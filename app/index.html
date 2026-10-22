@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#24584a">
+<title>Cálculos de Cobrança</title>
+<link rel="icon" href="icone.svg" type="image/svg+xml">
+<link rel="icon" href="icones/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icones/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Cálculos">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+<header class="topo">
+  <button id="btMenu" class="bt-menu" aria-label="Abrir menu">&#9776;</button>
+  <a class="marca" href="#/inicio"><img src="icone.svg" alt=""><span>Cálculos de Cobrança</span></a>
+  <a class="bt-manual" href="#/manual" title="Manual de uso">Manual</a>
+  <div class="topo-dir"><div id="usuarioTopo" class="usuario-topo"></div><div id="statusArmaz" class="status-armaz"></div></div>
+</header>
+<nav id="menu" class="menu">
+  <a href="#/inicio" data-rota="inicio">Cálculos</a>
+  <a href="#/calculo/novo" data-rota="calculo">Novo cálculo</a>
+  <a href="#/credores" data-rota="credor">Credores (clientes)</a>
+  <a href="#/usuarios" data-rota="usuarios" class="so-admin">Usuários</a>
+  <a href="#/config" data-rota="config" class="so-admin">Configurações</a>
+  <a href="#/conta" data-rota="conta">Minha conta</a>
+  <a href="#/manual" data-rota="manual">Manual de uso</a>
+  <a href="#/sobre" data-rota="sobre">Sobre, termos e privacidade</a>
+  <a href="#" id="btInstalar" class="link-instalar" hidden>Instalar o aplicativo</a>
+  <div id="rodapeMenu" class="rodape-menu"></div>
+</nav>
+<div id="fundoMenu" class="fundo-menu"></div>
+<main id="conteudo"><p class="carregando">Carregando…</p></main>
+
+<div id="modal" class="modal" hidden><div class="modal-caixa" id="modalCaixa"></div></div>
+<div id="aviso" class="aviso" role="status"></div>
+<datalist id="dlRubricas"></datalist>
+<datalist id="dlCustas"></datalist>
+
+<script src="lib/jspdf.umd.min.js"></script>
+<script src="util.js"></script>
+<script src="armazenamento.js"></script>
+<script src="auth.js"></script>
+<script src="indices.js"></script>
+<script src="calculo.js"></script>
+<script src="xlsx.js"></script>
+<script src="pdf.js"></script>
+<script src="relatorios.js"></script>
+<script src="sobre.js"></script>
+<script src="manual.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

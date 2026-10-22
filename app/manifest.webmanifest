@@ -1,0 +1,17 @@
+{
+  "name": "Cálculos de Cobrança",
+  "short_name": "Cálculos",
+  "description": "Planilhas de cálculo para cobrança judicial e extrajudicial.",
+  "lang": "pt-BR",
+  "id": "./index.html",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#24584a",
+  "theme_color": "#24584a",
+  "icons": [
+    { "src": "icones/icone-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icones/icone-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icones/icone-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

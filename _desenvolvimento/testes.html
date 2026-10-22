@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><title>Testes do motor de cálculo</title>
+<style>body{font:14px Arial;margin:20px}.ok{color:#176b2c}.erro{color:#b3261e;font-weight:bold}pre{background:#f4f4f4;padding:8px}</style></head>
+<body><h1>Testes do motor de cálculo</h1><div id="saida"></div>
+<script src="../app/util.js"></script>
+<script>
+// Índices fictícios: IPCA 1% ao mês, taxa legal 0,5% ao mês, SELIC 1% ao mês (contas conferíveis à mão)
+const D = { config: { padroes: {} }, indices: { series: {} } };
+for (const [n, v] of [['IPCA', 1], ['Taxa legal', 0.5], ['SELIC', 1]]) {
+  D.indices.series[n] = {};
+  for (let m = '2019-01'; m <= '2026-09'; m = addMes(m, 1)) D.indices.series[n][m] = v;
+}
+</script>
+<script src="../app/indices.js"></script>
+<script src="../app/calculo.js"></script>
+<script>
+const res = [];
+const perto = (a, b, tol = 0.011) => Math.abs(a - b) <= tol;
+function confere(nome, obtido, esperado, tol) {
+  res.push({ nome, ok: perto(obtido, esperado, tol), obtido, esperado });
+}
+const rub = (valor, desde, regimes, extra = {}) => ({ id: 'r' + Math.random(), descricao: 'Rubrica', valor, corrDesde: desde, jurosDesde: desde, regimes, ...extra });
+const IPCA1 = [{ desde: '', indice: 'IPCA', juros: 'mensal', taxa: 1 }];
+const calc = (o, data) => calcular({ tipo: 'judicial', rubricas: [], custas: [], honorarios: [], multas: [], amortizacoes: [], ...o }, data);
+
+// 1) IPCA + 1% a.m. simples
+{
+  const r = calc({ rubricas: [rub(10000, '2024-01-15', IPCA1)] }, '2024-07-15');
+  const corr = 10000 * Math.pow(1.01, 6), juros = corr * 0.01 / 30 * 182;
+  confere('1. corrigido', r.itens[0].principal, corr);
+  confere('1. juros', r.itens[0].juros, juros);
+  confere('1. total', r.total, r2(corr) + r2(juros));
+}
+// 2) Transição da Lei 14.905/2024
+{
+  const regs = [{ desde: '', indice: 'IPCA', juros: 'mensal', taxa: 1 }, { desde: '2024-08-30', indice: 'IPCA', juros: 'legal' }];
+  const r = calc({ rubricas: [rub(10000, '2024-06-10', regs)] }, '2024-10-10');
+  const corr = 10000 * Math.pow(1.01, 4);
+  const taxa = 0.01 / 30 * 81 + 0.005 / 31 * 2 + 0.005 + 0.005 / 31 * 9;
+  confere('2. corrigido', r.itens[0].principal, corr);
+  confere('2. juros', r.itens[0].juros, corr * taxa);
+}
+// 3) Amortização imputada primeiro nos juros
+{
+  const r = calc({ rubricas: [rub(10000, '2024-01-01', IPCA1)], amortizacoes: [{ data: '2024-04-01', valor: 1000, imputacao: 'juros', destino: 'proporcional' }] }, '2024-07-01');
+  const f1 = Math.pow(1.01, 3), f2 = Math.pow(1.01, 6);
+  const J1 = 10000 * 0.01 / 30 * 91;               // em unidades da data-base
+  const Pb = 10000 - (1000 / f1 - J1);
+  const J2 = Pb * 0.01 / 30 * 91;
+  confere('3. principal', r.itens[0].principal, Pb * f2);
+  confere('3. juros', r.itens[0].juros, J2 * f2);
+  confere('3. juros imputados', r.amort[0].imputado[0].juros, J1 * f1);
+}
+// 3b) Amortização imputada primeiro no principal
+{
+  const r = calc({ rubricas: [rub(10000, '2024-01-01', IPCA1)], amortizacoes: [{ data: '2024-04-01', valor: 1000, imputacao: 'principal', destino: 'proporcional' }] }, '2024-07-01');
+  const f1 = Math.pow(1.01, 3), f2 = Math.pow(1.01, 6);
+  const J1 = 10000 * 0.01 / 30 * 91, Pb = 10000 - 1000 / f1, J2 = Pb * 0.01 / 30 * 91;
+  confere('3b. principal', r.itens[0].principal, Pb * f2);
+  confere('3b. juros (vencidos corrigidos, sem juros sobre juros)', r.itens[0].juros, (J1 + J2) * f2);
+}
+// 4) Honorários sobre a condenação, custas e art. 523
+{
+  const r = calc({
+    rubricas: [rub(10000, '2024-01-01', IPCA1)], regimes: IPCA1,
+    custas: [{ id: 'c1', data: '2024-02-01', descricao: 'Custas', valor: 500, corrigir: true }],
+    honorarios: [{ id: 'h1', forma: 'condenacao', pct: 10 }],
+    art523: { aplicar: true, multa: 10, honorarios: 10, baseHonorarios: true, baseCustas: false, baseMultas: true },
+  }, '2024-07-01');
+  const rubF = 10000 * Math.pow(1.01, 6) * (1 + 0.01 / 30 * 182);
+  confere('4. base do art. 523 (verba + honorários, atualizados)', r.r523.baseFinal, rubF * 1.1, 0.02);
+  confere('4. multa do art. 523', r.itens.find(i => i.itemId === 'art523-multa').total, rubF * 0.11, 0.02);
+  confere('4. honorários sucumbenciais', r.itens.find(i => i.itemId === 'h1').total, rubF * 0.1, 0.02);
+  confere('4. custas', r.itens.find(i => i.itemId === 'c1').total, 500 * Math.pow(1.01, 5));
+}
+// 5) UFIR-RJ até a Lei 14.905 e SELIC depois
+{
+  const regs = [{ desde: '', indice: 'UFIR-RJ', juros: 'mensal', taxa: 1 }, { desde: '2024-08-30', indice: 'Nenhum', juros: 'selic' }];
+  const r = calc({ rubricas: [rub(1000, '2020-03-10', regs)] }, '2024-10-10');
+  const f = 4.5373 / 3.5550;
+  const taxa = 0.01 / 30 * diasEntre('2020-03-10', '2024-08-30') + 0.01 / 31 * 2 + 0.01 + 0.01 / 31 * 9;
+  confere('5. corrigido', r.itens[0].principal, 1000 * f);
+  confere('5. juros', r.itens[0].juros, 1000 * f * taxa);
+}
+// 6) Dano moral: juros desde o evento (Súm. 54) e correção desde o arbitramento (Súm. 362)
+{
+  const r = calc({ rubricas: [rub(20000, '2024-03-05', IPCA1, { jurosDesde: '2023-01-10' })] }, '2024-06-05');
+  const f = Math.pow(1.01, 3);
+  confere('6. juros desde o evento sobre o valor corrigido', r.itens[0].juros, 20000 * f * 0.01 / 30 * diasEntre('2023-01-10', '2024-06-05'));
+}
+// 7) Pagamento em item específico com sobra para os demais (mais antigos primeiro) e excedente
+{
+  const a = rub(1000, '2024-01-01', [{ desde: '', indice: 'Nenhum', juros: 'nenhum' }]), b = rub(500, '2024-02-01', [{ desde: '', indice: 'Nenhum', juros: 'nenhum' }]);
+  const r = calc({ rubricas: [a, b], amortizacoes: [{ data: '2024-03-01', valor: 1700, imputacao: 'juros', destino: a.id }] }, '2024-04-01');
+  confere('7. item A quitado', r.itens.find(i => i.itemId === a.id).total, 0);
+  confere('7. item B quitado', r.itens.find(i => i.itemId === b.id).total, 0);
+  confere('7. excedente', r.excedente, 200);
+}
+// 8) Multa contratual e capitalização mensal
+{
+  const regs = [{ desde: '', indice: 'IPCA', juros: 'mensal', taxa: 2, capitalizar: true }];
+  const r = calc({ rubricas: [rub(1000, '2024-01-01', regs, { multa: 2 })] }, '2024-04-01');
+  const f = Math.pow(1.01, 3), d = 91;
+  confere('8. multa', r.itens[0].multa, 1000 * f * 0.02);
+  confere('8. juros capitalizados', r.itens[0].juros, 1000 * f * (Math.pow(1.02, d / 30) - 1));
+}
+// 9) Astreintes com teto e multa sobre o valor da causa
+{
+  const r = calc({
+    valorCausa: { valor: 50000, data: '2024-01-01' },
+    multas: [{ id: 'm1', forma: 'diaria', valorDia: 100, inicio: '2024-02-01', fim: '2024-02-29', teto: 2000, corrDesde: '2024-02-29' },
+      { id: 'm2', forma: 'pctCausa', pct: 2 }],
+    regimes: IPCA1,
+  }, '2024-05-01');
+  confere('9. astreintes limitadas ao teto, corrigidas', r.itens.find(i => i.itemId === 'm1').total, 2000 * Math.pow(1.01, 3));
+  confere('9. multa de 2% da causa corrigida', r.itens.find(i => i.itemId === 'm2').total, 1000 * Math.pow(1.01, 4));
+}
+// 10) Pagamento parcial no prazo reduz a base do art. 523 (§ 2º)
+{
+  const regs0 = [{ desde: '', indice: 'Nenhum', juros: 'nenhum' }];
+  const r = calc({ rubricas: [rub(10000, '2024-01-01', regs0)], regimes: regs0,
+    amortizacoes: [{ data: '2024-03-10', valor: 4000, imputacao: 'juros', destino: 'proporcional', noPrazo: true }],
+    art523: { aplicar: true, multa: 10, honorarios: 10 } }, '2024-04-01');
+  confere('10. base 523 = saldo após o pagamento no prazo', r.r523.baseFinal, 6000);
+  confere('10. total', r.total, 7200);
+}
+// 13) Critérios numa linha (crit) com a Lei 14.905, custas com juros e honorários com outra base
+{
+  const crit = { indice: 'IPCA', juros: 'mensal', taxa: 1, lei14905: true };
+  const r = calc({
+    rubricas: [{ id: 'r1', descricao: 'Verba', valor: 10000, corrDesde: '2024-06-10', jurosDesde: '2024-06-10', crit }],
+    custas: [{ id: 'c1', descricao: 'Custas', valor: 300, corrDesde: '2024-07-01', jurosDesde: '2024-08-01', crit: { indice: 'IPCA', juros: 'mensal', taxa: 1 } }],
+    honorarios: [{ id: 'h1', forma: 'condenacao', pct: 10, fora: ['r1'], outras: [{ valor: 5000, corrDesde: '2024-06-01', jurosDesde: '', crit: { indice: 'IPCA', juros: 'nenhum' } }] }],
+  }, '2024-10-10');
+  const corr = 10000 * Math.pow(1.01, 4), taxa = 0.01 / 30 * 81 + 0.005 / 31 * 2 + 0.005 + 0.005 / 31 * 9;
+  confere('13. verba com transição da Lei 14.905', r.itens.find(i => i.itemId === 'r1').total, r2(corr) + r2(corr * taxa));
+  confere('13. custas com juros desde 01/08', r.itens.find(i => i.itemId === 'c1').total, 300 * Math.pow(1.01, 3) * (1 + 0.01 / 30 * diasEntre('2024-08-01', '2024-10-10')));
+  confere('13. honorários só sobre a outra base', r.itens.find(i => i.itemId === 'h1').total, 500 * Math.pow(1.01, 4));
+}
+
+// 11) Art. 523 com base atualizada (padrão), só a multa, pagamento posterior ao prazo não reduz a base
+{
+  const a = rub(10000, '2024-01-01', IPCA1);
+  const r = calc({ rubricas: [a], regimes: IPCA1,
+    amortizacoes: [{ data: '2024-06-01', valor: 3000, imputacao: 'juros', destino: a.id }],
+    art523: { aplicar: true, data: '2024-03-01', incluirMulta: true, multa: 10, incluirHonorarios: false, honorarios: 10 } }, '2024-07-01');
+  const bruto = 10000 * Math.pow(1.01, 6) * (1 + 0.01 / 30 * 182);
+  confere('11. multa = 10% do débito atualizado, sem abater o pagamento posterior', r.itens.find(i => i.itemId === 'art523-multa').total, bruto * 0.1, 0.02);
+  confere('11. sem honorários do art. 523', r.itens.filter(i => i.itemId === 'art523-hon').length, 0);
+  confere('11. base informada', r.r523.baseFinal, bruto, 0.02);
+}
+// 12) Data com ano inválido (0017) é ignorada, sem travar
+{
+  const r = calc({ rubricas: [rub(1000, '0017-12-01', IPCA1)] }, '2024-07-01');
+  confere('12. ano inválido ignorado', r.total, 1000);
+}
+
+// 14) Amortização nas custas primeiro e o restante proporcionalmente nas verbas
+{
+  const s = [{ desde: '', indice: 'Nenhum', juros: 'nenhum' }];
+  const a = rub(1000, '2024-01-01', s), b = rub(3000, '2024-01-01', s);
+  const r = calc({ rubricas: [a, b], custas: [{ id: 'c1', descricao: 'Custas', valor: 200, corrDesde: '2024-01-01', crit: { indice: 'Nenhum', juros: 'nenhum' } }],
+    amortizacoes: [{ data: '2024-02-01', valor: 600, imputacao: 'juros', destino: 'custasPrimeiro' }] }, '2024-03-01');
+  confere('14. custas quitadas', r.itens.find(i => i.itemId === 'c1').total, 0);
+  confere('14. sobra de 400 rateada: verba A', r.itens.find(i => i.itemId === a.id).total, 900);
+  confere('14. sobra de 400 rateada: verba B', r.itens.find(i => i.itemId === b.id).total, 2700);
+}
+
+document.getElementById('saida').innerHTML = `<p><b>${res.filter(x => x.ok).length} de ${res.length} conferências corretas</b></p>` +
+  res.map(x => `<div class="${x.ok ? 'ok' : 'erro'}">${x.ok ? '✔' : '✘'} ${x.nome}: obtido ${x.obtido?.toFixed?.(4)} · esperado ${x.esperado.toFixed(4)}</div>`).join('');
+window.resultadoTestes = res;
+</script></body></html>
