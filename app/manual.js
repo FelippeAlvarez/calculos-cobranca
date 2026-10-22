@@ -95,7 +95,9 @@ const MANUAL = [
       <li><b>Data com ano errado</b>: ao digitar o ano com dois dígitos (ex.: 17), o programa completa (2017). Datas inválidas aparecem num alerta e impedem salvar.</li>
       <li><b>Valor diferente de outra planilha</b>: confira os termos iniciais (correção e juros), o índice, o tipo de juros, a marca da Lei 14.905 e a base do art. 523 e dos honorários.</li>
       <li><b>Programa desatualizado</b>: recarregue a página com Ctrl+F5.</li>
-      <li><b>Instalar como aplicativo</b>: botão <b>Instalar</b> no topo (ou "Instalar o aplicativo" no menu). No Chrome e no Edge, no computador e no Android, os dados salvos no navegador continuam no aplicativo instalado. No iPhone e no iPad, o aplicativo instalado tem armazenamento separado do Safari: antes, exporte uma cópia dos dados e depois importe no aplicativo (ou use o Dropbox). Aberto pelo arquivo do computador, o programa não se instala: abra o endereço publicado.</li>
+      <li><b>Instalar como aplicativo</b>: botão <b>Instalar</b> no topo (ou "Instalar o aplicativo" no menu) e depois <b>Instalar agora</b>, que fica ativo assim que o navegador libera a instalação (o Chrome e o Edge pedem alguns segundos de uso da página). O navegador pergunta se você quer instalar e cria o atalho na área de trabalho e no menu Iniciar (no celular, na tela inicial).
+        No Chrome e no Edge, no computador e no Android, os dados salvos no navegador continuam no aplicativo instalado. No iPhone e no iPad, o aplicativo instalado tem armazenamento separado do Safari: antes, exporte uma cópia dos dados e depois importe no aplicativo (ou use o Dropbox).
+        Aberto pelo arquivo do computador, o programa não se instala: use <b>Abrir levando os dados</b>, que abre o endereço publicado e envia para lá uma cópia dos dados (você confirma o recebimento na nova aba); depois, instale por lá.</li>
     </ul>`],
 ];
 
