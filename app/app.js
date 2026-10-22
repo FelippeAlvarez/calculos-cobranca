@@ -1,7 +1,7 @@
 'use strict';
 /* Cálculos de Cobrança — dados, telas e editor dos cálculos */
 
-const VERSAO = '1.3.1';
+const VERSAO = '1.3.2';
 
 /* ================= Dados ================= */
 const D = { config: null, indices: null, credores: {}, calculos: {}, carregadoEm: 0 };
@@ -1343,6 +1343,14 @@ async function instalarApp() {
     $('#instEstado').textContent = 'Pronto: clique em "Instalar agora".';
   };
   $('#instAgora').addEventListener('click', () => executar(confirmarInstalacao));
+  // Sem liberação em 15 segundos, mostra o caminho pelo menu do navegador (que também cria o atalho)
+  setTimeout(() => {
+    const bt = $('#instAgora');
+    if (!bt || !bt.disabled) return;
+    $('#instEstado').innerHTML = '<b>O navegador não liberou a instalação direta</b> (talvez o aplicativo já esteja instalado). Use o menu do navegador, como explicado abaixo.';
+    const d = bt.closest('.modal-caixa').querySelector('details');
+    if (d) d.open = true;
+  }, 15000);
 }
 
 async function confirmarInstalacao() {
