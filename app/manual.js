@@ -22,7 +22,8 @@ const MANUAL = [
     <p>Cada credor e cada cálculo ficam num arquivo próprio. Os arquivos excluídos vão para a subpasta "lixeira". Se duas pessoas alterarem o mesmo cálculo ao mesmo tempo, o programa avisa e recarrega os dados antes de gravar.</p>`],
 
   ['calculo', 'Dados do cálculo e devedores', `
-    <p>Escolha o credor, o tipo (judicial ou extrajudicial) e preencha os devedores. No judicial, informe o processo, o juízo e, se for usar honorários ou multas sobre o valor da causa, o <b>valor da causa</b> e a <b>data do ajuizamento</b> (termo inicial da correção do valor da causa).</p>
+    <p>Escolha o credor principal e, se houver mais de um, use <b>+ Adicionar credor</b> (o credor precisa estar cadastrado em "Credores"). Do credor principal vêm os critérios sugeridos para as novas verbas e os honorários contratuais; todos os credores saem na planilha e o cálculo aparece na tela de cada um deles.
+      Escolha o tipo (judicial ou extrajudicial) e preencha os devedores. No judicial, informe o processo, o juízo e, se for usar honorários ou multas sobre o valor da causa, o <b>valor da causa</b> e a <b>data do ajuizamento</b> (termo inicial da correção do valor da causa).</p>
     <p>As observações internas não saem na planilha. "Duplicar" cria uma cópia do cálculo salvo, útil para simular outros critérios.</p>`],
 
   ['verbas', 'Verbas e critérios de correção e juros', `

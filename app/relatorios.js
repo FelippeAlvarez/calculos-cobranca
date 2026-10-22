@@ -1,7 +1,12 @@
 'use strict';
 /* Planilhas de cálculo em PDF e Excel (memória de cálculo nos termos do art. 524 do CPC) */
 
-const nomeCredor = c => D.credores[c.credorId]?.nome || '—';
+// Credores do cálculo: o principal (credorId, de onde vêm os critérios sugeridos) e os demais
+const credoresDoCalculo = c => [...new Set([c.credorId, ...(c.outrosCredores || [])].filter(Boolean))];
+const nomeCredor = c => credoresDoCalculo(c).map(id => D.credores[id]?.nome).filter(Boolean).join('; ') || '—';
+const nomeCredorCurto = c => { const l = credoresDoCalculo(c); return (D.credores[l[0]]?.nome || '—') + (l.length > 1 ? ' e outros' : ''); };
+const credoresTexto = c => credoresDoCalculo(c).map(id => D.credores[id]).filter(Boolean)
+  .map(cr => cr.nome + (cr.documento ? ` (${rotuloDoc(cr.documento)} ${fmtDoc(cr.documento)})` : '')).join('; ') || '—';
 const devedoresTexto = c => (c.devedores || []).filter(d => d.nome).map(d => d.nome + (d.documento ? ` (${rotuloDoc(d.documento)} ${fmtDoc(d.documento)})` : '')).join('; ') || '—';
 const devedoresCurto = c => (c.devedores || []).filter(d => d.nome).map(d => d.nome).join('; ') || '—';
 const descProcesso = c => c.tipo === 'judicial'
@@ -9,9 +14,8 @@ const descProcesso = c => c.tipo === 'judicial'
   : 'Cobrança extrajudicial';
 
 function linhasInfo(c) {
-  const cr = D.credores[c.credorId] || {};
   const l = [
-    `Credor: ${cr.nome || '—'}${cr.documento ? ` - ${rotuloDoc(cr.documento)} ${fmtDoc(cr.documento)}` : ''}`,
+    `Credor${credoresDoCalculo(c).length > 1 ? 'es' : ''}: ${credoresTexto(c)}`,
     `Devedor${(c.devedores || []).filter(d => d.nome).length > 1 ? 'es' : ''}: ${devedoresTexto(c)}`,
     descProcesso(c),
   ];
@@ -68,7 +72,7 @@ function gerarPDFCalculo(c, dataCalc, nome) {
   P.cab();
   tituloPDF(P, descTitulo(c), c.tipo === 'judicial' ? [['Memória de cálculo (art. 524 do CPC). Valores atualizados até ' + fmtData(dataCalc) + '.', 9, 'normal', COR_SUAVE]]
     : [['Valores atualizados até ' + fmtData(dataCalc) + '.', 9, 'normal', COR_SUAVE]]);
-  blocoInfoPDF(P, nomeCredor(c) + ' x ' + devedoresCurto(c), linhasInfo(c));
+  blocoInfoPDF(P, nomeCredorCurto(c) + ' x ' + devedoresCurto(c), linhasInfo(c));
   const pg = r.temPagamento;
   let n = 0;
   for (const g of r.grupos) {
@@ -187,7 +191,7 @@ function cabecalhoXLSX(larguras = []) {
 }
 
 async function exportarCalculo(formato, c, dataCalc) {
-  const nome = nomeArquivo('Calculo', nomeCredor(c).slice(0, 30), devedoresCurto(c).slice(0, 40), fmtData(dataCalc).replace(/\//g, '-'));
+  const nome = nomeArquivo('Calculo', nomeCredorCurto(c).slice(0, 30), devedoresCurto(c).slice(0, 40), fmtData(dataCalc).replace(/\//g, '-'));
   if (formato === 'xlsx') return salvarPlanilha(gerarXLSXCalculo(c, dataCalc), nome + '.xlsx');
   const pdf = gerarPDFCalculo(c, dataCalc, nome);
   return formato === 'ver' ? visualizarPDF(pdf) : salvarPDF(pdf);

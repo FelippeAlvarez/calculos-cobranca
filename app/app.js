@@ -1,7 +1,7 @@
 'use strict';
 /* Cálculos de Cobrança — dados, telas e editor dos cálculos */
 
-const VERSAO = '1.1.0';
+const VERSAO = '1.2.0';
 
 /* ================= Dados ================= */
 const D = { config: null, indices: null, credores: {}, calculos: {}, carregadoEm: 0 };
@@ -155,7 +155,7 @@ async function telaInicio() {
   const st = { busca: localStorage.getItem('ccb-busca') || '', cred: '', tipo: 'todos', sit: 'ativo' };
   const tot = {};
   const totalDe = c => (tot[c.id] = tot[c.id] ?? calcular(c, data).total);
-  const filtrar = () => lista.filter(c => (!st.cred || c.credorId === st.cred) && (st.tipo === 'todos' || c.tipo === st.tipo)
+  const filtrar = () => lista.filter(c => (!st.cred || credoresDoCalculo(c).includes(st.cred)) && (st.tipo === 'todos' || c.tipo === st.tipo)
     && (st.sit === 'todos' || (c.situacao || 'ativo') === st.sit)
     && (!st.busca || normalizar([nomeCredor(c), c.titulo, devedoresCurto(c), c.processo, ...(c.devedores || []).map(d => soDigitos(d.documento))].join(' ')).includes(normalizar(st.busca))));
   const ativos = lista.filter(c => (c.situacao || 'ativo') === 'ativo');
@@ -239,7 +239,7 @@ function ligarCrit(raiz, k, aoMudar) {
 /* ================= Credores ================= */
 function telaCredores() {
   const lista = Object.values(D.credores).sort((a, b) => comparar(a.nome, b.nome));
-  const qtd = id => Object.values(D.calculos).filter(c => c.credorId === id && (c.situacao || 'ativo') === 'ativo').length;
+  const qtd = id => Object.values(D.calculos).filter(c => credoresDoCalculo(c).includes(id) && (c.situacao || 'ativo') === 'ativo').length;
   $('#conteudo').innerHTML = cabecalho('Credores (clientes)', '', '<a class="bt primario" href="#/credor/novo">Novo credor</a>') +
     `<div class="cartao">${lista.length ? `<div class="rolagem"><table class="tabela clicavel"><thead><tr><th>Nome</th><th>CPF/CNPJ</th><th>Endereço</th><th class="num">Cálculos ativos</th></tr></thead><tbody>
       ${lista.map(c => `<tr data-id="${c.id}"><td>${esc(c.nome)}</td><td>${esc(fmtDoc(c.documento))}</td><td>${esc(c.endereco)}</td><td class="num">${qtd(c.id)}</td></tr>`).join('')}</tbody></table></div>`
@@ -252,7 +252,7 @@ function telaCredor(id) {
   const c = novo ? { id: novoId(), nome: '', documento: '', endereco: '', contato: '', obs: '', padroes: {} } : structuredClone(D.credores[id]);
   if (!c) throw new Error('Credor não encontrado.');
   c.padroes = c.padroes || {};
-  const calcs = novo ? [] : Object.values(D.calculos).filter(x => x.credorId === id).sort(ordemCalculo);
+  const calcs = novo ? [] : Object.values(D.calculos).filter(x => credoresDoCalculo(x).includes(id)).sort(ordemCalculo);
   const proprio = c.padroes.crit || critDeRegimes(c.padroes.regimes);
   const crit = { ...(proprio || critPadrao()) };
   const data = hoje();
@@ -367,6 +367,7 @@ function telaCalculo(id, params) {
   for (const k of ['rubricas', 'custas', 'honorarios', 'multas', 'amortizacoes']) c[k] = c[k] || [];
   c.devedores = c.devedores?.length ? c.devedores : [{ nome: '', documento: '', endereco: '' }];
   c.valorCausa = c.valorCausa || { valor: 0, data: '' };
+  c.outrosCredores = c.outrosCredores || [];
   c.art523 = c.art523 || novoCalculo().art523;
   migrarCalculo(c);
   garantirIndices().then(() => { if (document.body.contains($('#calcResumo'))) recalcular(); });
@@ -377,7 +378,9 @@ function telaCalculo(id, params) {
     novo ? '' : `${chipTipo(c)}${chipSit(c)} <span class="dica">${c.alteradoPor ? 'Alterado por ' + esc(c.alteradoPor) + ' em ' : 'Alterado em '}${new Date(c.alteradoEm).toLocaleString('pt-BR')}</span>`, '', '#/inicio') + `
   <div class="cartao"><h2>Dados do cálculo</h2>
     <div class="grade-form" id="dados">
-      ${campo('Credor *', `<select data-c="credorId"><option value="">— escolha —</option>${optCredores(c.credorId)}</select>`, 'w2')}
+      <div class="campo wfull"><label>Credor(es) *</label><div id="credoresCalc"></div>
+        <div><button type="button" class="bt pequeno" id="btAddCred">+ Adicionar credor</button></div>
+        <small>O primeiro é o credor principal: dele vêm os critérios sugeridos para as novas verbas e os honorários contratuais. Para cadastrar um credor novo, use "Credores (clientes)".</small></div>
       ${campo('Descrição (opcional)', `<input data-c="titulo" value="${esc(c.titulo || '')}" placeholder="Ex.: Indenização por danos morais e materiais">`, 'w2')}
       <div class="campo w2"><label>Tipo</label><div class="segmentado">
         <label><input type="radio" name="tipo" value="judicial" ${c.tipo === 'judicial' ? 'checked' : ''}> Judicial</label>
@@ -443,9 +446,33 @@ function telaCalculo(id, params) {
 
   // ---- Dados gerais
   $$('[data-c]').forEach(el => el.addEventListener('input', () => { c[el.dataset.c] = el.value; alterado(); }));
-  $('[data-c=credorId]').addEventListener('change', () => {
-    if (novo) { c.honContr = honContrCredor(c.credorId); $('#honContr').value = fmtPct(c.honContr); }
+
+  // ---- Credores (o primeiro é o principal)
+  function desenharCredores() {
+    const ids = [c.credorId || '', ...(c.outrosCredores || [])];
+    $('#credoresCalc').innerHTML = ids.map((id, i) => `<div class="linha-credor" data-i="${i}">
+      <select data-cred>${i ? '' : '<option value="">— escolha —</option>'}${optCredores(id)}</select>
+      ${i ? '<button type="button" class="bt-x" title="Remover credor">&times;</button>' : '<span class="dica">Principal</span>'}</div>`).join('');
+    $$('#credoresCalc .linha-credor').forEach(l => {
+      const i = +l.dataset.i;
+      $('[data-cred]', l).addEventListener('change', e => {
+        if (i === 0) {
+          c.credorId = e.target.value;
+          if (novo) { c.honContr = honContrCredor(c.credorId); $('#honContr').value = fmtPct(c.honContr); }
+        } else c.outrosCredores[i - 1] = e.target.value;
+        alterado();
+      });
+      $('.bt-x', l)?.addEventListener('click', () => { c.outrosCredores.splice(i - 1, 1); desenharCredores(); alterado(); });
+    });
+  }
+  $('#btAddCred').addEventListener('click', () => {
+    const usados = new Set([c.credorId, ...c.outrosCredores]);
+    const livre = Object.values(D.credores).sort((a, b) => comparar(a.nome, b.nome)).find(x => !usados.has(x.id));
+    if (!livre) return aviso('Todos os credores cadastrados já estão no cálculo. Cadastre outro em "Credores (clientes)".', 'erro');
+    c.outrosCredores.push(livre.id);
+    desenharCredores(); alterado();
   });
+  desenharCredores();
   const mostrarTipo = () => {
     $$('.so-judicial').forEach(e => { e.hidden = c.tipo !== 'judicial'; });
     $$('.so-extra').forEach(e => { e.hidden = c.tipo === 'judicial'; });
@@ -726,7 +753,9 @@ function telaCalculo(id, params) {
 
   // ---- Salvar / excluir / duplicar
   function validar() {
-    if (!c.credorId) throw new Error('Escolha o credor.');
+    if (!c.credorId) throw new Error('Escolha o credor principal.');
+    const ids = [c.credorId, ...c.outrosCredores];
+    if (new Set(ids).size !== ids.length) throw new Error('O mesmo credor foi escolhido mais de uma vez.');
     if (!c.devedores.some(d => d.nome)) throw new Error('Informe o devedor.');
     const ruins = datasInvalidas(c);
     if (ruins.length) throw new Error('Data inválida (confira o ano): ' + ruins.join('; ') + '.');
