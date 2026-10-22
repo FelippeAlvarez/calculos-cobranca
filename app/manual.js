@@ -19,6 +19,8 @@ const MANUAL = [
       <li><b>Somente neste navegador</b>: para testes. Os dados podem ser perdidos se o navegador for limpo.</li>
     </ul>
     <p><b>Mudar de local:</b> em "Minha conta" ou "Configurações", use <b>Mudar o local dos dados…</b>. O programa pergunta se deve levar uma cópia dos dados atuais (cálculos, credores, usuários, configurações e índices). Se o novo local já tiver dados, pergunta de novo: copiar só o que falta ou substituir os arquivos iguais. Nada é apagado do local de origem.</p>
+    <p><b>Cópia em arquivo:</b> em "Minha conta", <b>Exportar cópia dos dados</b> gera um arquivo com todos os dados; <b>Importar cópia dos dados</b> (administrador) grava esse arquivo no local atual. Numa base nova, a importação aparece já na tela de primeiro acesso.
+      Use para levar os dados a outro aparelho, ao aplicativo instalado no iPhone, ao endereço publicado (se você usava o programa aberto pelo arquivo do computador) ou como cópia de segurança.</p>
     <p>Cada credor e cada cálculo ficam num arquivo próprio. Os arquivos excluídos vão para a subpasta "lixeira". Se duas pessoas alterarem o mesmo cálculo ao mesmo tempo, o programa avisa e recarrega os dados antes de gravar.</p>`],
 
   ['calculo', 'Dados do cálculo e devedores', `
@@ -93,7 +95,7 @@ const MANUAL = [
       <li><b>Data com ano errado</b>: ao digitar o ano com dois dígitos (ex.: 17), o programa completa (2017). Datas inválidas aparecem num alerta e impedem salvar.</li>
       <li><b>Valor diferente de outra planilha</b>: confira os termos iniciais (correção e juros), o índice, o tipo de juros, a marca da Lei 14.905 e a base do art. 523 e dos honorários.</li>
       <li><b>Programa desatualizado</b>: recarregue a página com Ctrl+F5.</li>
-      <li><b>Instalar como aplicativo</b>: use "Instalar o aplicativo" no menu (no iPhone, Compartilhar > Adicionar à Tela de Início).</li>
+      <li><b>Instalar como aplicativo</b>: botão <b>Instalar</b> no topo (ou "Instalar o aplicativo" no menu). No Chrome e no Edge, no computador e no Android, os dados salvos no navegador continuam no aplicativo instalado. No iPhone e no iPad, o aplicativo instalado tem armazenamento separado do Safari: antes, exporte uma cópia dos dados e depois importe no aplicativo (ou use o Dropbox). Aberto pelo arquivo do computador, o programa não se instala: abra o endereço publicado.</li>
     </ul>`],
 ];
 

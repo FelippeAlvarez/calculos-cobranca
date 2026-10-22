@@ -1,7 +1,7 @@
 'use strict';
 /* Cálculos de Cobrança — dados, telas e editor dos cálculos */
 
-const VERSAO = '1.2.0';
+const VERSAO = '1.3.0';
 
 /* ================= Dados ================= */
 const D = { config: null, indices: null, credores: {}, calculos: {}, carregadoEm: 0 };
@@ -1007,6 +1007,37 @@ async function mudarLocal() {
   return DBX.entrar();
 }
 
+/* ---------- Cópia dos dados em arquivo (para levar a outro aparelho, ao aplicativo instalado ou como segurança) ---------- */
+async function exportarDados() {
+  $('#aviso').textContent = '';
+  const copia = await copiaDosDados();
+  const arq = { formato: 'calculos-cobranca', versao: VERSAO, exportadoEm: new Date().toISOString(), origem: copia.origem, arquivos: copia.arquivos };
+  baixar(new Blob([JSON.stringify(arq)], { type: 'application/json' }), `calculos-cobranca-dados-${hoje()}.json`);
+  aviso(`Cópia dos dados salva (${resumoCopia(copia.arquivos)}). Guarde o arquivo: ele contém dados pessoais dos devedores.`);
+}
+
+// Lê um arquivo exportado e grava os dados no local atual (pergunta antes se o local já tiver dados)
+function importarDados(depois) {
+  const inp = document.createElement('input');
+  inp.type = 'file';
+  inp.accept = '.json,application/json';
+  inp.addEventListener('change', () => executar(async () => {
+    const f = inp.files[0];
+    if (!f) return;
+    let j;
+    try { j = JSON.parse(await f.text()); } catch { throw new Error('Arquivo inválido: não é uma cópia dos dados do programa.'); }
+    if (j?.formato !== 'calculos-cobranca' || typeof j.arquivos !== 'object') throw new Error('Arquivo inválido: não é uma cópia dos dados do programa.');
+    const ok = await perguntar('Importar cópia dos dados', `<p>Arquivo <b>${esc(f.name)}</b>, exportado em ${new Date(j.exportadoEm).toLocaleString('pt-BR')} de "${esc(j.origem || '')}": <b>${esc(resumoCopia(j.arquivos))}</b>.</p>
+      <p>Gravar esses dados em <b>${esc(Armaz.descricao())}</b>? Se já houver dados aqui, o programa pergunta antes de substituir.</p>`,
+      [['sim', 'Importar', 'primario'], ['', 'Cancelar']]);
+    if (ok !== 'sim') return;
+    await IDB.set('kv', 'migracao', { origem: 'o arquivo ' + f.name, modo: 'arquivo', criadoEm: new Date().toISOString(), usuario: null, arquivos: j.arquivos });
+    await aplicarMigracaoPendente();
+    await depois();
+  }));
+  inp.click();
+}
+
 // Cópia pendente (pedida antes de mudar de local): grava os arquivos no local atual
 async function aplicarMigracaoPendente() {
   const mig = await IDB.get('kv', 'migracao').catch(() => null);
@@ -1118,6 +1149,7 @@ function telaPrimeiroAdmin() {
       <div class="campo"><label>Repita a senha</label><input id="adSenha2" type="password" autocomplete="new-password" required></div>
       <button class="bt primario">Criar administrador e entrar</button>
     </div>
+    <p style="margin-top:12px">Já usava o programa em outro aparelho ou endereço? <a href="#" id="adImportar">Importar uma cópia dos dados</a> (inclui os usuários; depois entre com o seu login).</p>
     <p style="margin-top:12px"><a href="#" id="adVoltar">Voltar</a></p>
   </form>`;
   $('#fAdm').addEventListener('submit', e => { e.preventDefault(); executar(async () => {
@@ -1127,6 +1159,7 @@ function telaPrimeiroAdmin() {
     await abrirBase();
   }); });
   $('#adVoltar').addEventListener('click', e => { e.preventDefault(); desconectarBase(); });
+  $('#adImportar').addEventListener('click', e => { e.preventDefault(); importarDados(conectado); });
 }
 
 function telaTrocarSenha(obrigatoria) {
@@ -1160,9 +1193,15 @@ function telaConta() {
       <div class="acoes-linha"><button class="bt" id="btSenha">Trocar a senha</button><button class="bt" id="btMudarLocal">Mudar o local dos dados…</button><button class="bt" id="btDesconectar">Desconectar este aparelho</button></div>
       <p class="dica" style="margin-top:8px">"Mudar o local dos dados" passa a usar outro local (Dropbox, pasta do computador ou só este navegador), com a opção de levar uma cópia dos dados atuais.
         "Desconectar este aparelho" sai do login e da conta do Dropbox neste aparelho (útil em computador compartilhado).</p></div>
+    <div class="cartao"><h2>Cópia dos dados em arquivo</h2>
+      <p class="dica">Para levar os dados a outro aparelho, ao aplicativo instalado no iPhone ou ao endereço publicado (se você usava o programa aberto pelo arquivo do computador), ou para guardar uma cópia de segurança.
+        O arquivo contém todos os cálculos, credores, usuários e configurações: guarde-o com cuidado.</p>
+      <div class="acoes-linha"><button class="bt" id="btExportar">Exportar cópia dos dados</button>${Auth.ehAdmin() ? '<button class="bt" id="btImportar">Importar cópia dos dados</button>' : ''}</div></div>
     <div id="areaSenha"></div>`;
   $('#btSenha').addEventListener('click', () => telaTrocarSenha(false));
   $('#btMudarLocal').addEventListener('click', () => executar(mudarLocal));
+  $('#btExportar').addEventListener('click', () => executar(exportarDados));
+  $('#btImportar')?.addEventListener('click', () => importarDados(async () => { await recarregarTudo(); rotear(); }));
   $('#btDesconectar').addEventListener('click', () => {
     if (!confirm('Desconectar este aparelho? Será preciso conectar o Dropbox e entrar de novo.')) return;
     sujo = false;
@@ -1265,23 +1304,47 @@ const ehIOS = () => /iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.
 const instalado = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
 let pedidoInstalacao = null;
 
+// Os botões de instalar aparecem sempre que o programa não estiver aberto como aplicativo instalado
 function atualizarBotoesInstalar() {
-  const mostrar = !instalado() && (pedidoInstalacao || ehIOS());
-  [$('#btInstalar'), $('#avisoInstalar')].forEach(el => { if (el) el.hidden = !mostrar; });
+  [$('#btInstalar'), $('#btInstalarTopo'), $('#avisoInstalar')].forEach(el => { if (el) el.hidden = instalado(); });
 }
 
+const NOTA_DADOS_JUNTO = 'Os dados que você já salvou neste navegador continuam disponíveis no aplicativo instalado, porque ele usa o mesmo endereço e o mesmo armazenamento do navegador. Se os dados estiverem no Dropbox ou numa pasta, basta escolher o mesmo local no aplicativo.';
+
 async function instalarApp() {
+  // Chrome e Edge (computador e Android): instalação direta
   if (pedidoInstalacao) {
-    pedidoInstalacao.prompt();
-    await pedidoInstalacao.userChoice.catch(() => null);
+    const p = pedidoInstalacao;
     pedidoInstalacao = null;
+    p.prompt();
+    const r = await p.userChoice.catch(() => null);
     atualizarBotoesInstalar();
+    if (r?.outcome === 'accepted') aviso('Aplicativo instalado. ' + NOTA_DADOS_JUNTO);
     return;
   }
-  abrirModal(`<div class="modal-cab"><h2>Instalar no iPhone ou iPad</h2><button class="bt-x" data-fechar>&times;</button></div>
-    <ol><li>Abra este endereço no <b>Safari</b>.</li><li>Toque no botão <b>Compartilhar</b> (quadrado com seta para cima).</li>
-    <li>Escolha <b>Adicionar à Tela de Início</b> e confirme.</li></ol>
-    <p class="dica">O ícone "Cálculos" aparece na tela de início e o programa abre em tela cheia, como um aplicativo.</p>`, 'modal-medio');
+  const conectadoAgora = document.body.classList.contains('conectado');
+  const btExportar = conectadoAgora ? '<button class="bt" id="instExportar">Exportar cópia dos dados</button>' : '';
+  let html;
+  if (location.protocol === 'file:') {
+    html = `<p>Aberto direto do arquivo do computador, o programa não pode ser instalado. Para instalar, abra o endereço publicado:</p>
+      <p><a href="${LINK_APP}" target="_blank" rel="noopener">${LINK_APP}</a></p>
+      <p><b>Para levar os dados salvos aqui:</b> ${Armaz.modo === 'local' ? 'eles estão só no navegador, neste endereço de arquivo, e não aparecem sozinhos no endereço publicado.' : 'escolha no aplicativo o mesmo local dos dados (Dropbox ou pasta), ou'}
+        exporte uma cópia dos dados aqui e, no aplicativo instalado, use "Importar cópia dos dados" (em Minha conta ou já no primeiro acesso).</p>`;
+  } else if (ehIOS()) {
+    html = `<ol><li>Abra este endereço no <b>Safari</b>.</li><li>Toque no botão <b>Compartilhar</b> (quadrado com seta para cima).</li>
+      <li>Escolha <b>Adicionar à Tela de Início</b> e confirme.</li></ol>
+      <p><b>Dados:</b> no iPhone e no iPad, o aplicativo instalado não enxerga o que foi salvo no Safari no modo "Somente neste navegador". Antes de instalar, exporte uma cópia dos dados; depois, no aplicativo, use "Importar cópia dos dados". Se os dados estiverem no Dropbox, basta conectar o mesmo Dropbox e escolher a mesma pasta.</p>`;
+  } else {
+    html = `<p>Instale pelo menu do navegador:</p>
+      <ul><li><b>Google Chrome</b>: menu <b>⋮</b> &gt; <b>Transmitir, salvar e compartilhar</b> &gt; <b>Instalar página como app</b> (ou o ícone de instalação na barra de endereço).</li>
+        <li><b>Microsoft Edge</b>: menu <b>…</b> &gt; <b>Aplicativos</b> &gt; <b>Instalar este site como um aplicativo</b>.</li>
+        <li><b>Android</b>: menu <b>⋮</b> do Chrome &gt; <b>Instalar app</b> (ou "Adicionar à tela inicial").</li></ul>
+      <p class="dica">Se a opção não aparecer, o programa provavelmente já está instalado neste aparelho: procure o ícone "Cálculos". O Firefox não instala aplicativos deste tipo; use o Chrome ou o Edge.</p>
+      <p><b>Dados:</b> ${NOTA_DADOS_JUNTO}</p>`;
+  }
+  abrirModal(`<div class="modal-cab"><h2>Instalar o aplicativo</h2><button class="bt-x" data-fechar>&times;</button></div>${html}
+    <div class="acoes-linha">${btExportar}<button class="bt" data-fechar>Fechar</button></div>`, 'modal-medio');
+  $('#instExportar')?.addEventListener('click', () => executar(exportarDados));
 }
 
 function prepararInstalacao() {
@@ -1289,9 +1352,9 @@ function prepararInstalacao() {
     navigator.serviceWorker.register('sw.js').catch(e => console.warn('Service worker', e));
   }
   window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); pedidoInstalacao = e; atualizarBotoesInstalar(); });
-  window.addEventListener('appinstalled', () => { pedidoInstalacao = null; atualizarBotoesInstalar(); aviso('Aplicativo instalado.'); });
+  window.addEventListener('appinstalled', () => { pedidoInstalacao = null; atualizarBotoesInstalar(); });
   document.addEventListener('click', e => {
-    if (e.target.closest('#btInstalar, #btInstalar2')) { e.preventDefault(); executar(instalarApp); }
+    if (e.target.closest('#btInstalar, #btInstalar2, #btInstalarTopo')) { e.preventDefault(); executar(instalarApp); }
   });
   atualizarBotoesInstalar();
 }
