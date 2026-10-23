@@ -3,12 +3,16 @@
   "short_name": "Cálculos",
   "description": "Planilhas de cálculo para cobrança judicial e extrajudicial.",
   "lang": "pt-BR",
-  "id": "./index.html",
-  "start_url": "./index.html",
+  "start_url": "./",
   "scope": "./",
   "display": "standalone",
+  "orientation": "any",
   "background_color": "#24584a",
   "theme_color": "#24584a",
+  "categories": ["business", "productivity"],
+  "related_applications": [
+    { "platform": "webapp", "url": "https://felippealvarez.github.io/calculos-cobranca/app/manifest.webmanifest" }
+  ],
   "icons": [
     { "src": "icones/icone-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
     { "src": "icones/icone-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
