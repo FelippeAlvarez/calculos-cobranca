@@ -197,7 +197,9 @@ function parcelasDosItens(c, ctx) {
     const corr = it.corrDesde || it.data || '';
     if (!(Number(it.valor) > 0) || !corr) continue;
     const regs = !it.crit && it.corrigir === false ? regimesDeCrit({ indice: 'Nenhum', juros: 'mensal', taxa: 1 }) : regimesDoItem(it, c);
-    lista.push(novaParcela({ itemId: it.id, grupo: 'custas', rotulo: it.descricao || 'Custas', P0: Number(it.valor), data: corr,
+    // O Id. do comprovante no processo (opcional) sai junto com a descrição em todas as planilhas
+    const rotulo = (it.descricao || 'Custas') + (String(it.idProc || '').trim() ? ` (Id. ${String(it.idProc).trim()})` : '');
+    lista.push(novaParcela({ itemId: it.id, grupo: 'custas', rotulo, P0: Number(it.valor), data: corr,
       corrDesde: corr, jurosDesde: it.jurosDesde || '', regimes: regs }));
   }
   const causa = c.valorCausa || {};

@@ -450,3 +450,4 @@ a.link-cartao h2 { color: var(--pri); }
 .valor-tipo input { flex: 1; min-width: 0; }
 .valor-tipo select { width: auto; flex: none; }
 #acItens .valor-tipo input { width: 90px; flex: none; }
+.tabela-verbas .id-proc { min-width: 110px; }

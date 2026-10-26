@@ -1,7 +1,7 @@
 'use strict';
 /* Cálculos de Cobrança — dados, telas e editor dos cálculos */
 
-const VERSAO = '1.4.0';
+const VERSAO = '1.5.0';
 
 /* ================= Dados ================= */
 const D = { config: null, indices: null, credores: {}, calculos: {}, carregadoEm: 0 };
@@ -19,7 +19,31 @@ function normalizarConfig(c) {
   // Critérios sugeridos para as novas verbas (versões anteriores guardavam uma lista de períodos)
   c.padroes.crit = { ...CRIT_PADRAO, ...(c.padroes.crit || critDeRegimes(c.padroes.regimes) || {}) };
   delete c.padroes.regimes;
+  // Sugestões de descrição nos campos de verbas e de despesas (editáveis em Configurações)
+  if (!Array.isArray(c.descVerbas)) c.descVerbas = [...DESC_RUBRICAS];
+  if (!Array.isArray(c.descCustas)) c.descCustas = [...DESC_CUSTAS];
   return c;
+}
+
+function atualizarSugestoes() {
+  $('#dlRubricas').innerHTML = (D.config?.descVerbas || DESC_RUBRICAS).map(r => `<option value="${esc(r)}">`).join('');
+  $('#dlCustas').innerHTML = (D.config?.descCustas || DESC_CUSTAS).map(r => `<option value="${esc(r)}">`).join('');
+}
+
+const linhasDeTexto = t => [...new Set(String(t || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean))];
+
+// Edição rápida de uma lista de sugestões (verbas ou despesas), a partir da tela do cálculo
+function editarSugestoes(chave, titulo) {
+  if (!Auth.ehAdmin()) throw new Error('Só o administrador altera as listas de sugestões (em Configurações).');
+  abrirModal(`<div class="modal-cab"><h2>${esc(titulo)}</h2><button class="bt-x" data-fechar>&times;</button></div>
+    <p class="dica">Uma sugestão por linha. Elas aparecem como opções ao digitar a descrição; ainda é possível digitar qualquer outro texto. A lista vale para todos os cálculos desta base.</p>
+    <textarea id="sugTexto" rows="14">${esc(D.config[chave].join('\n'))}</textarea>
+    <div class="acoes-linha"><button class="bt primario" id="sugSalvar">Salvar a lista</button><button class="bt" data-fechar>Cancelar</button></div>`, 'modal-medio');
+  $('#sugSalvar').addEventListener('click', () => executar(async () => {
+    await salvarConfig({ ...structuredClone(D.config), [chave]: linhasDeTexto($('#sugTexto').value) });
+    fecharModal();
+    aviso('Lista de sugestões salva.');
+  }));
 }
 
 const usuarioLocal = () => Auth.usuario?.nome || '';
@@ -57,6 +81,7 @@ async function recarregarTudo() {
   D.credores = credores;
   D.calculos = calculos;
   D.carregadoEm = Date.now();
+  atualizarSugestoes();
 }
 
 // Grava o registro conferindo se ninguém o alterou desde que foi lido
@@ -81,6 +106,7 @@ async function excluirRegistro(col, id) {
 async function salvarConfig(c) {
   await Armaz.gravar('config.json', JSON.stringify(c, null, 1));
   D.config = normalizarConfig(c);
+  atualizarSugestoes();
 }
 
 // Critérios do credor (em branco, os das Configurações)
@@ -398,12 +424,13 @@ function telaCalculo(id, params) {
 
   <div class="cartao"><div class="cartao-cab"><h2>Verbas (condenação / débito)</h2><button class="bt pequeno" id="btAddRub">+ Adicionar verba</button></div>
     <p class="dica">Uma linha por verba, com os próprios termos iniciais e critérios. Ex.: danos morais com correção desde o arbitramento (Súmula 362 do STJ) e juros desde o evento danoso (Súmula 54 do STJ); danos materiais com correção desde o efetivo prejuízo (Súmula 43 do STJ). Juros desde em branco: sem juros.
-      <b>Lei 14.905</b>: a partir de 30/08/2024, correção pelo IPCA e juros pela taxa legal.</p>
+      <b>Lei 14.905</b>: a partir de 30/08/2024, correção pelo IPCA e juros pela taxa legal. <a href="#" id="sugVerbas">Editar as sugestões de descrição</a></p>
     <div class="rolagem"><table class="tabela tabela-edit tabela-verbas"><thead><tr><th>Verba</th><th class="num">Valor (R$)</th><th>Correção desde</th><th>Juros desde</th>${CAB_CRIT}<th class="num">Multa %</th><th></th></tr></thead><tbody id="rubricas"></tbody></table></div></div>
 
   <div class="cartao"><div class="cartao-cab"><h2>Custas e despesas</h2><button class="bt pequeno" id="btAddCus">+ Adicionar</button></div>
-    <p class="dica">Uma linha por despesa: correção em geral desde o desembolso; juros só se indicar o termo inicial. Para não corrigir, escolha o índice "Nenhum".</p>
-    <div class="rolagem"><table class="tabela tabela-edit tabela-verbas"><thead><tr><th>Descrição</th><th class="num">Valor (R$)</th><th>Correção desde</th><th>Juros desde</th>${CAB_CRIT}<th></th></tr></thead><tbody id="custas"></tbody></table></div></div>
+    <p class="dica">Uma linha por despesa: correção em geral desde o desembolso; juros só se indicar o termo inicial. Para não corrigir, escolha o índice "Nenhum".
+      "Id. no processo" (opcional) indica onde está o comprovante nos autos e sai na planilha. <a href="#" id="sugCustas">Editar as sugestões de descrição</a></p>
+    <div class="rolagem"><table class="tabela tabela-edit tabela-verbas"><thead><tr><th>Descrição</th><th class="num">Valor (R$)</th><th>Correção desde</th><th>Juros desde</th>${CAB_CRIT}<th>Id. no processo</th><th></th></tr></thead><tbody id="custas"></tbody></table></div></div>
 
   <div class="cartao so-judicial"><div class="cartao-cab"><h2>Honorários advocatícios sucumbenciais</h2><button class="bt pequeno" id="btAddHon">+ Adicionar</button></div>
     <p class="dica">Sobre a condenação: marque as verbas da base (os honorários acompanham a correção e os juros de cada uma) e, se houver, inclua outras bases, como o valor líquido de uma obrigação de fazer. Valor fixo ou sobre o valor da causa: juros desde o trânsito em julgado (art. 85, § 16, do CPC).</p>
@@ -556,7 +583,10 @@ function telaCalculo(id, params) {
   });
 
   // ---- Custas
-  const desenharCustas = () => linhasVerbas($('#custas'), c.custas, { lista: 'dlCustas', vazioTxt: 'Nenhuma despesa lançada.', aoMudarDesc: desenharAmortizacoes });
+  const desenharCustas = () => linhasVerbas($('#custas'), c.custas, { lista: 'dlCustas', vazioTxt: 'Nenhuma despesa lançada.', aoMudarDesc: desenharAmortizacoes,
+    extra: { html: it => `<td><input data-k="idProc" class="id-proc" value="${esc(it.idProc || '')}" placeholder="Ex.: 123456789" title="Id. do documento no processo eletrônico (comprovante da despesa)"></td>` } });
+  $('#sugVerbas').addEventListener('click', e => { e.preventDefault(); executar(() => editarSugestoes('descVerbas', 'Sugestões de descrição das verbas')); });
+  $('#sugCustas').addEventListener('click', e => { e.preventDefault(); executar(() => editarSugestoes('descCustas', 'Sugestões de descrição das despesas')); });
   $('#btAddCus').addEventListener('click', () => {
     c.custas.push({ id: novoId(), descricao: '', valor: 0, corrDesde: '', jurosDesde: '', crit: critNovo(c.custas) });
     desenharTudo(); marcarSujo();
@@ -865,6 +895,14 @@ function telaConfig() {
     <div id="cfgCrit">${critFormulario(crit)}</div>
     <div class="grade-form" style="margin-top:10px"><div class="campo"><label>Honorários contratuais padrão (%), extrajudicial</label><input id="cfgHon" inputmode="decimal" value="${esc(fmtPct(c.padroes.honContr))}"></div></div>
     <label class="inline" style="margin-top:10px"><input type="checkbox" id="ignNeg" ${c.padroes.ignorarNegativos ? 'checked' : ''}> Desconsiderar índices mensais negativos (deflação) na correção monetária</label>
+    <h3 class="sec" style="margin-top:16px">Sugestões de descrição</h3>
+    <p class="dica">Opções que aparecem ao digitar a descrição de uma verba ou de uma despesa (uma por linha). Ainda é possível digitar qualquer outro texto.</p>
+    <div class="grade-form">
+      <div class="campo w2"><label>Verbas</label><textarea id="cfgDescVerbas" rows="10">${esc(c.descVerbas.join('\n'))}</textarea>
+        <small><a href="#" data-padrao="verbas">Restaurar a lista original</a></small></div>
+      <div class="campo w2"><label>Custas e despesas</label><textarea id="cfgDescCustas" rows="10">${esc(c.descCustas.join('\n'))}</textarea>
+        <small><a href="#" data-padrao="custas">Restaurar a lista original</a></small></div>
+    </div>
     <div class="barra-form"><button class="bt primario">Salvar configurações</button></div>
   </form>
   ${secaoIndicesHTML()}
@@ -874,6 +912,11 @@ function telaConfig() {
   $('#btMudarLocal').addEventListener('click', () => executar(mudarLocal));
   ligarIndices();
   ligarCrit($('#cfgCrit'), crit, marcarSujo);
+  $$('[data-padrao]').forEach(a => a.addEventListener('click', e => {
+    e.preventDefault();
+    $(a.dataset.padrao === 'verbas' ? '#cfgDescVerbas' : '#cfgDescCustas').value = (a.dataset.padrao === 'verbas' ? DESC_RUBRICAS : DESC_CUSTAS).join('\n');
+    marcarSujo();
+  }));
   let logo = { logo: e.logo, logoL: e.logoL, logoA: e.logoA };
   $('#fEsc').addEventListener('input', marcarSujo);
   const mostrarLogo = () => {
@@ -903,6 +946,8 @@ function telaConfig() {
     const f = new FormData(ev.target);
     c.escritorio = { ...Object.fromEntries(['nome', 'documento', 'oab', 'endereco', 'telefone', 'email', 'site'].map(k => [k, String(f.get(k) || '').trim()])), ...logo };
     c.padroes = { crit, honContr: parseValor($('#cfgHon').value), ignorarNegativos: $('#ignNeg').checked };
+    c.descVerbas = linhasDeTexto($('#cfgDescVerbas').value);
+    c.descCustas = linhasDeTexto($('#cfgDescCustas').value);
     await salvarConfig(c);
     sujo = false;
     aviso('Configurações salvas.');
@@ -1302,8 +1347,7 @@ function eventosGlobais() {
       aviso(`Ano completado: ${fmtData(el.value)}.`);
     } else aviso('Data inválida: confira o ano (' + fmtData(el.value) + ').', 'erro');
   }, true);
-  $('#dlRubricas').innerHTML = DESC_RUBRICAS.map(r => `<option value="${esc(r)}">`).join('');
-  $('#dlCustas').innerHTML = DESC_CUSTAS.map(r => `<option value="${esc(r)}">`).join('');
+  atualizarSugestoes();
   // Ao voltar para a janela, relê os dados (outras pessoas podem ter alterado pelo Dropbox)
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible' || !document.body.classList.contains('conectado') || sujo || !$('#modal').hidden) return;

@@ -43,7 +43,9 @@ const MANUAL = [
     <p><b>Como o programa calcula:</b> a correção acumula os índices mensais do mês do termo inicial até o mês anterior ao do cálculo (como a Calculadora do Cidadão do Banco Central); a UFIR-RJ usa a divisão entre os valores anuais. Os juros são simples, pro rata die, sobre o valor corrigido.</p>`],
 
   ['custas', 'Custas e despesas', `
-    <p>Uma linha por despesa, com descrição, valor, correção desde (em geral, a data do desembolso) e, se for o caso, juros desde. Os critérios são próprios de cada linha. Para não corrigir uma despesa, escolha o índice "Nenhum".</p>`],
+    <p>Uma linha por despesa, com descrição, valor, correção desde (em geral, a data do desembolso) e, se for o caso, juros desde. Os critérios são próprios de cada linha. Para não corrigir uma despesa, escolha o índice "Nenhum".</p>
+    <p><b>Id. no processo</b> (opcional): o Id. do comprovante da despesa nos autos eletrônicos. Preenchido, aparece ao lado da descrição na tela, no PDF, no Excel e na simulação de acordo, por exemplo "Custas iniciais (Id. 123456789)".</p>
+    <p><b>Sugestões de descrição:</b> as opções que aparecem ao digitar a descrição de uma verba ou despesa podem ser alteradas pelo administrador em <b>Configurações &gt; Sugestões de descrição</b> ou pelo link "Editar as sugestões de descrição" nos quadros de verbas e de custas. A lista vale para todos os cálculos da base.</p>`],
 
   ['honorarios', 'Honorários sucumbenciais', `
     <ul>
