@@ -78,6 +78,18 @@ const MANUAL = [
     </ul>
     <p>O débito é atualizado até a data do pagamento e o valor é abatido. Se o item ou grupo escolhido ficar quitado, o que sobrar vai para os demais itens, dos mais antigos para os mais novos. Os juros vencidos e não pagos continuam corrigidos, mas não rendem juros. O PDF traz um demonstrativo de cada pagamento.</p>`],
 
+  ['acordos', 'Simulação de acordo', `
+    <p>Em <b>Acordos</b> (menu) ou no botão <b>Simular acordo</b> da tela do cálculo, escolha o débito e a <b>data do acordo</b>: o débito é atualizado até essa data, item por item.</p>
+    <ul>
+      <li><b>Desconto</b>: sobre o total (em R$ ou %, rateado entre os itens) ou verba por verba (R$ ou % em cada item).</li>
+      <li><b>Sinal</b>: em R$ ou % do valor já com desconto, pago na data do acordo.</li>
+      <li><b>Parcelamento</b>: informe o número de parcelas (o programa calcula o valor) ou o valor da parcela (o programa calcula quantas são; a última é ajustada). Juros ao mês pela Tabela Price; com taxa zero, parcelas iguais sem juros.</li>
+      <li><b>Vencimento da 1ª parcela</b>: qualquer data; as demais vencem no mesmo dia dos meses seguintes. Marque se incidem <b>juros desde a data do acordo até o 1º vencimento</b> (proporcionais aos dias). Desmarcado, o saldo não rende juros até lá e a 1ª parcela não tem juros.</li>
+      <li><b>Correção das parcelas</b>: as parcelas ficam em valores da data do acordo; o índice escolhido corrige cada uma até o pagamento. Use "Valor corrigido de uma parcela" para saber quanto pagar numa data.</li>
+      <li><b>Rateio</b>: o cronograma mostra, em cada parcela e no sinal, quanto é do credor e quanto é de honorários advocatícios, na proporção do débito com desconto.</li>
+    </ul>
+    <p>Salve a simulação para guardá-la no cálculo (pode haver várias por débito) e gere o PDF ou o Excel (com fórmulas no parcelamento).</p>`],
+
   ['planilhas', 'Planilhas em PDF e Excel', `
     <p>No quadro "Cálculo", escolha a data em "Atualizar até". O resumo e o detalhamento de cada item aparecem na tela. Use "Visualizar PDF", "Salvar PDF" ou "Salvar Excel" (não é preciso salvar o cálculo antes).</p>
     <p>No judicial, o PDF é o demonstrativo de débito com a memória de cálculo do art. 524 do CPC: índices, taxas, termos iniciais e finais, fatores, juros e amortizações de cada item. No Excel, os itens sem pagamentos e sem capitalização têm fórmulas; os demais trazem os valores calculados.</p>`],

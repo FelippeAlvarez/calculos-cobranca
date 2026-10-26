@@ -1,7 +1,7 @@
 'use strict';
 /* Cálculos de Cobrança — dados, telas e editor dos cálculos */
 
-const VERSAO = '1.3.2';
+const VERSAO = '1.4.0';
 
 /* ================= Dados ================= */
 const D = { config: null, indices: null, credores: {}, calculos: {}, carregadoEm: 0 };
@@ -134,6 +134,7 @@ async function rotear() {
   const tela = {
     inicio: telaInicio, credores: telaCredores, credor: () => telaCredor(arg?.split('?')[0]),
     calculo: () => telaCalculo(arg?.split('?')[0], params),
+    acordos: telaAcordos, acordo: () => telaAcordo(...h.split('?')[0].split('/').slice(1, 3)),
     config: () => Auth.ehAdmin() ? telaConfig() : telaConta(), conta: telaConta,
     usuarios: () => Auth.ehAdmin() ? telaUsuarios() : telaConta(),
   }[rota] || telaInicio;
@@ -440,7 +441,19 @@ function telaCalculo(id, params) {
     <div class="acoes-linha"><button class="bt" id="expVer">Visualizar PDF</button><button class="bt" id="expPdf">Salvar PDF</button><button class="bt" id="expXlsx">Salvar Excel</button></div>
   </div>
 
+  <div class="cartao"><div class="cartao-cab"><h2>Simulações de acordo</h2><button class="bt pequeno" id="btAcordo">Simular acordo</button></div>
+    ${(original?.acordos || []).length ? `<div class="rolagem"><table class="tabela clicavel"><thead><tr><th>Data</th><th>Simulação</th><th class="num">Com desconto</th><th>Parcelamento</th></tr></thead><tbody>
+      ${original.acordos.map(a => { let ra = null; try { ra = calcularAcordo(original, a); } catch { /* cálculo incompleto */ }
+        return `<tr data-acordo="${a.id}"><td>${fmtData(a.data)}</td><td>${esc(a.nome || '—')}</td><td class="num">${ra ? fmtNum(ra.comDesconto) : '—'}</td>
+          <td>${ra ? (ra.sinal ? `Sinal ${fmtMoeda(ra.sinal)} + ` : '') + (ra.n ? `${ra.n} × ${fmtMoeda(ra.parcela)}` : 'à vista') : ''}</td></tr>`; }).join('')}</tbody></table></div>`
+      : '<p class="vazio">Nenhuma simulação. Use "Simular acordo" para calcular desconto, sinal e parcelamento sobre este débito.</p>'}</div>
+
   <div class="barra-salvar"><span id="estadoSalvar"></span>${novo ? '' : (Auth.ehAdmin() ? '<button class="bt perigo" id="btExcluir">Excluir</button>' : '') + '<button class="bt" id="btDuplicar">Duplicar</button>'}<button class="bt primario" id="btSalvar">Salvar</button></div>`;
+  $('#btAcordo').addEventListener('click', () => executar(() => {
+    if (novo || sujo) throw new Error('Salve o cálculo antes de simular o acordo.');
+    location.hash = `#/acordo/${c.id}/novo`;
+  }));
+  $$('tr[data-acordo]').forEach(tr => tr.addEventListener('click', () => { location.hash = `#/acordo/${c.id}/${tr.dataset.acordo}`; }));
 
   const alterado = () => { marcarSujo(); recalcularLogo(); };
 
@@ -787,7 +800,7 @@ function telaCalculo(id, params) {
   }));
   $('#btDuplicar')?.addEventListener('click', () => executar(async () => {
     if (sujo) throw new Error('Salve as alterações antes de duplicar.');
-    const copia = { ...structuredClone(original), id: novoId(), rev: 0, criadoEm: '', titulo: (original.titulo || 'Cálculo') + ' (cópia)' };
+    const copia = { ...structuredClone(original), id: novoId(), rev: 0, criadoEm: '', titulo: (original.titulo || 'Cálculo') + ' (cópia)', acordos: [] };
     await salvarRegistro('calculos', copia);
     location.hash = '#/calculo/' + copia.id;
   }));

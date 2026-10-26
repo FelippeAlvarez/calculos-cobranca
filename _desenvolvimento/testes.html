@@ -13,6 +13,7 @@ for (const [n, v] of [['IPCA', 1], ['Taxa legal', 0.5], ['SELIC', 1]]) {
 </script>
 <script src="../app/indices.js"></script>
 <script src="../app/calculo.js"></script>
+<script src="../app/acordo.js"></script>
 <script>
 const res = [];
 const perto = (a, b, tol = 0.011) => Math.abs(a - b) <= tol;
@@ -164,6 +165,61 @@ const calc = (o, data) => calcular({ tipo: 'judicial', rubricas: [], custas: [],
   confere('14. custas quitadas', r.itens.find(i => i.itemId === 'c1').total, 0);
   confere('14. sobra de 400 rateada: verba A', r.itens.find(i => i.itemId === a.id).total, 900);
   confere('14. sobra de 400 rateada: verba B', r.itens.find(i => i.itemId === b.id).total, 2700);
+}
+
+/* ---------- Simulação de acordo ---------- */
+const S0 = [{ desde: '', indice: 'Nenhum', juros: 'nenhum' }];
+const debito10mil = (extra = {}) => ({ tipo: 'judicial', rubricas: [rub(10000, '2024-01-01', S0, { id: 'rA' })], custas: [], honorarios: [], multas: [], amortizacoes: [], ...extra });
+const acordo = (p, extra = {}) => ({ data: '2024-03-01', desconto: { modo: 'total', tipo: 'pct', valor: 0 }, sinal: { tipo: 'valor', valor: 0 },
+  parcelas: { modo: 'numero', n: 10, taxa: 1, primeiro: '2024-03-31', jurosAte1: true, indice: 'IPCA', ...p }, ...extra });
+const amortTotal = ra => ra.cronograma.reduce((s, x) => s + x.amortizacao, 0);
+// 15) Tabela Price comum (1º vencimento 30 dias depois, com juros)
+{
+  const ra = calcularAcordo(debito10mil(), acordo({}));
+  const pmt = 10000 * 0.01 / (1 - Math.pow(1.01, -10));
+  confere('15. parcela Price', ra.parcela, pmt);
+  confere('15. amortizações somam o saldo', amortTotal(ra), 10000);
+  confere('15. saldo final zero', ra.cronograma[ra.cronograma.length - 1].saldo, 0);
+  confere('15. juros da 1ª parcela (30 dias)', ra.cronograma[0].juros, 100);
+}
+// 16) Sem juros até o 1º vencimento, que cai 45 dias depois
+{
+  const ra = calcularAcordo(debito10mil(), acordo({ primeiro: '2024-04-15', jurosAte1: false }));
+  confere('16. parcela antecipada', ra.parcela, 10000 * 0.01 / ((1 - Math.pow(1.01, -10)) * 1.01));
+  confere('16. 1ª parcela sem juros', ra.cronograma[0].juros, 0);
+  confere('16. vencimento da 2ª parcela', ra.cronograma[1].vencimento === '2024-05-15' ? 1 : 0, 1);
+}
+// 17) Com juros até um 1º vencimento 45 dias depois (juros proporcionais compostos)
+{
+  const ra = calcularAcordo(debito10mil(), acordo({ primeiro: '2024-04-15' }));
+  const SV = 10000 * Math.pow(1.01, 45 / 30);
+  confere('17. parcela', ra.parcela, SV * 0.01 / ((1 - Math.pow(1.01, -10)) * 1.01));
+  confere('17. juros da 1ª parcela', ra.cronograma[0].juros, SV - 10000);
+}
+// 18) Valor da parcela informado: número de parcelas e última ajustada
+{
+  const ra = calcularAcordo(debito10mil(), acordo({ modo: 'valor', valor: 1500 }));
+  const n = Math.ceil(-Math.log(1 - 10100 * 0.01 / (1500 * 1.01)) / Math.log(1.01));
+  confere('18. número de parcelas', ra.n, n);
+  confere('18. amortizações somam o saldo', amortTotal(ra), 10000);
+  confere('18. última parcela menor', ra.cronograma[ra.n - 1].valor < 1500 ? 1 : 0, 1);
+}
+// 19) Desconto de 10% sobre o total e sinal de 20% sobre o valor com desconto
+{
+  const ra = calcularAcordo(debito10mil(), acordo({}, { desconto: { modo: 'total', tipo: 'pct', valor: 10 }, sinal: { tipo: 'pct', valor: 20 } }));
+  confere('19. com desconto', ra.comDesconto, 9000);
+  confere('19. sinal', ra.sinal, 1800);
+  confere('19. saldo a parcelar', ra.saldo, 7200);
+}
+// 20) Desconto verba por verba e rateio entre credor e honorários
+{
+  const c = debito10mil({ honorarios: [{ id: 'h1', forma: 'fixo', valor: 1000, data: '2024-01-01', crit: { indice: 'Nenhum', juros: 'nenhum' } }] });
+  const ra = calcularAcordo(c, acordo({ taxa: 0, n: 4 }, { desconto: { modo: 'itens', itens: { rA: { tipo: 'pct', valor: 50 } } } }));
+  confere('20. débito', ra.debito, 11000);
+  confere('20. com desconto (50% só na verba)', ra.comDesconto, 6000);
+  confere('20. parcela sem juros', ra.parcela, 1500);
+  confere('20. honorários em cada parcela', ra.cronograma[0].honorarios, 250);
+  confere('20. credor em cada parcela', ra.cronograma[0].credor, 1250);
 }
 
 document.getElementById('saida').innerHTML = `<p><b>${res.filter(x => x.ok).length} de ${res.length} conferências corretas</b></p>` +
