@@ -1,7 +1,7 @@
 'use strict';
 /* Cálculos de Cobrança — dados, telas e editor dos cálculos */
 
-const VERSAO = '1.6.0';
+const VERSAO = '1.6.1';
 
 /* ================= Dados ================= */
 const D = { config: null, indices: null, credores: {}, calculos: {}, carregadoEm: 0 };

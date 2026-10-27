@@ -46,7 +46,7 @@ const MANUAL = [
     <p>Para débitos que vencem todo mês (aluguel, cota condominial, IPTU, alimentos, honorários de partido…), use, no quadro de verbas:</p>
     <ul>
       <li><b>Lançar meses em sequência</b>: rubrica, competências inicial e final, dia e mês do vencimento, valor mensal, multa, juros (desde cada vencimento, art. 397 do CC; desde uma data única, como a citação; ou sem juros) e os critérios de correção e juros da série.
-        Opcionalmente, <b>reajuste anual</b>: a cada aniversário (mês escolhido), o valor é reajustado pelo índice acumulado dos 12 meses anteriores (UFIR-RJ: valor do ano dividido pelo do ano anterior). A prévia mostra cada reajuste.</li>
+        Opcionalmente, <b>reajuste anual</b>: a cada aniversário (mês escolhido), o valor é reajustado pelo índice acumulado dos 12 meses anteriores (UFIR-RJ: valor do ano dividido pelo do ano anterior). A prévia mostra cada reajuste. A opção <b>não reduzir o valor</b> (marcada de início) mantém o valor quando o índice acumulado for negativo.</li>
       <li><b>Importar planilha</b> (Excel, CSV ou PDF com texto): indique as colunas de competência, vencimento, valor e, se houver, rubrica. Cada rubrica vira uma série.</li>
     </ul>
     <p>Cada rubrica forma uma <b>série</b>, e o mesmo mês pode ter várias (aluguel, condomínio e IPTU de março, por exemplo). Lançar de novo a mesma rubrica acrescenta meses à série, sem repetir competências.

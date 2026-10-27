@@ -28,9 +28,11 @@ function valoresDaSerie(de, ate, valor, reajuste) {
   let atual = Number(valor) || 0;
   for (let m = de; m <= ate; m = addMes(m, 1)) {
     if (reajuste?.ativo && m > de && +m.slice(5) === +reajuste.mes) {
-      const f = fatorReajuste(reajuste.indice, m, faltando);
+      const variacao = fatorReajuste(reajuste.indice, m, faltando);
+      // "Não reduzir": com índice acumulado negativo, o valor fica como está
+      const f = reajuste.naoReduzir && variacao < 1 ? 1 : variacao;
       atual = r2(atual * f);
-      aniversarios.push({ ym: m, fator: f, valor: atual });
+      aniversarios.push({ ym: m, fator: f, variacao, valor: atual, mantido: f !== variacao });
     }
     valores[m] = atual;
   }
@@ -48,7 +50,7 @@ function descSerie(s) {
   p.push(s.juros === 'data' ? `e juros de mora desde ${fmtData(s.jurosData)}` : s.juros === 'nenhum' ? 'e sem juros de mora' : 'e juros de mora desde cada vencimento');
   let t = p.join(' ') + '. Critérios: ' + descRegimes(regimesDeCrit(s.crit || critPadrao()), s.juros !== 'nenhum') + '.';
   if (Number(s.multa)) t += ` Multa de ${fmtPct(s.multa)}% sobre o valor corrigido de cada prestação.`;
-  if (s.reajuste?.ativo) t += ` Valores reajustados anualmente em ${MESES[(+s.reajuste.mes || 1) - 1].toLowerCase()} ${pelo(s.reajuste.indice)} acumulado dos 12 meses anteriores.`;
+  if (s.reajuste?.ativo) t += ` Valores reajustados anualmente em ${MESES[(+s.reajuste.mes || 1) - 1].toLowerCase()} ${pelo(s.reajuste.indice)} acumulado dos 12 meses anteriores${s.reajuste.naoReduzir ? ', sem redução quando o índice acumulado for negativo' : ''}.`;
   const pagos = (s.meses || []).filter(m => m.pago).length;
   if (pagos) t += ` ${pagos} mês(es) marcado(s) como pago(s), não incluído(s).`;
   return t;
@@ -98,6 +100,7 @@ function janelaSequencia(c, critBase, depois) {
       <div class="campo w2"><label class="inline" style="white-space:normal;margin-top:22px"><input type="checkbox" id="sqReaj"> Reajustar o valor a cada aniversário pelo índice acumulado dos 12 meses anteriores</label></div>
       ${campo('Índice do reajuste', `<select id="sqReajIndice">${INDICES.filter(i => i !== 'Nenhum').map(i => `<option ${i === 'IGP-M' ? 'selected' : ''}>${i}</option>`).join('')}</select>`, 'sq-reaj')}
       ${campo('Mês do aniversário', `<select id="sqReajMes">${MESES.map((m, i) => `<option value="${i + 1}">${m}</option>`).join('')}</select>`, 'sq-reaj', 'Ex.: contrato de locação de março: reajuste a partir da competência de março de cada ano.')}
+      <div class="campo w2 sq-reaj"><label class="inline" style="white-space:normal;margin-top:22px"><input type="checkbox" id="sqNaoReduzir" checked> Não reduzir o valor quando o índice acumulado for negativo</label></div>
     </div>
     <p id="sqPrevia" class="dica"></p>
     <div class="barra-form"><button class="bt primario">Lançar</button><button type="button" class="bt" data-fechar>Cancelar</button></div></form>`, 'modal-item');
@@ -112,9 +115,11 @@ function janelaSequencia(c, critBase, depois) {
     mostrar();
     const de = $('#sqDe').value, ate = $('#sqAte').value, valor = parseValor($('#sqValor').value);
     if (!ehMes(de) || !ehMes(ate) || de > ate || !(valor > 0)) { $('#sqPrevia').textContent = ''; return; }
-    const r = valoresDaSerie(de, ate, valor, { ativo: $('#sqReaj').checked, indice: $('#sqReajIndice').value, mes: +$('#sqReajMes').value });
+    const r = valoresDaSerie(de, ate, valor, { ativo: $('#sqReaj').checked, indice: $('#sqReajIndice').value, mes: +$('#sqReajMes').value, naoReduzir: $('#sqNaoReduzir').checked });
     const qtd = Object.keys(r.valores).length, total = Object.values(r.valores).reduce((s, v) => s + cent(v), 0) / 100;
-    $('#sqPrevia').innerHTML = `${qtd} mês(es), total originário ${fmtMoeda(total)}.` + r.aniversarios.map(a => `<br>Reajuste em ${mesNum(a.ym)}: fator ${fmtFator(a.fator)}, novo valor ${fmtMoeda(a.valor)}.`).join('')
+    $('#sqPrevia').innerHTML = `${qtd} mês(es), total originário ${fmtMoeda(total)}.` + r.aniversarios.map(a => a.mantido
+      ? `<br>Reajuste em ${mesNum(a.ym)}: índice negativo (fator ${fmtFator(a.variacao)}), valor mantido em ${fmtMoeda(a.valor)}.`
+      : `<br>Reajuste em ${mesNum(a.ym)}: fator ${fmtFator(a.fator)}, novo valor ${fmtMoeda(a.valor)}.`).join('')
       + (r.faltando.length ? `<br><b>Índice não disponível para ${esc(r.faltando.join(', '))}: o reajuste desses meses fica incompleto (corrija o valor depois, mês a mês).</b>` : '');
   }
   // Rubrica já lançada: os meses vão para a série existente, com os critérios dela
@@ -144,7 +149,7 @@ function janelaSequencia(c, critBase, depois) {
     if (!ehMes(de) || !ehMes(ate) || de > ate) throw new Error('Confira as competências inicial e final.');
     if (!(valor > 0)) throw new Error('Informe o valor mensal.');
     if ($('#sqJuros').value === 'data' && !ehData($('#sqJurosData').value)) throw new Error('Informe a data dos juros.');
-    const reajuste = { ativo: $('#sqReaj').checked, indice: $('#sqReajIndice').value, mes: +$('#sqReajMes').value };
+    const reajuste = { ativo: $('#sqReaj').checked, indice: $('#sqReajIndice').value, mes: +$('#sqReajMes').value, naoReduzir: $('#sqNaoReduzir').checked };
     const { valores } = valoresDaSerie(de, ate, valor, reajuste);
     const s = serieDe(c, desc, crit);
     Object.assign(s, { crit: { ...crit }, multa: parseValor($('#sqMulta').value), juros: $('#sqJuros').value, jurosData: $('#sqJurosData').value });

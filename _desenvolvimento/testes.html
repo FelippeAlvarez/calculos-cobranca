@@ -262,6 +262,16 @@ const esperadoMes = (valor, venc, calc) => {
   confere('24. depois do 1º reajuste', v.valores['2023-03'], r2(1000 * Math.pow(1.01, 12)));
   confere('24. depois do 2º reajuste', v.valores['2024-03'], r2(r2(1000 * Math.pow(1.01, 12)) * Math.pow(1.01, 12)));
 }
+// 24b) Reajuste com índice negativo: sem a opção, o valor cai; com "não reduzir", fica igual
+{
+  const IPCAantes = { ...D.indices.series.IPCA };
+  for (let m = '2023-03'; m <= '2024-02'; m = addMes(m, 1)) D.indices.series.IPCA[m] = -0.5;
+  const cai = valoresDaSerie('2024-01', '2024-04', 1000, { ativo: true, indice: 'IPCA', mes: 3 });
+  const mantem = valoresDaSerie('2024-01', '2024-04', 1000, { ativo: true, indice: 'IPCA', mes: 3, naoReduzir: true });
+  D.indices.series.IPCA = IPCAantes;
+  confere('24b. índice negativo reduz o valor', cai.valores['2024-03'], r2(1000 * Math.pow(0.995, 12)));
+  confere('24b. com "não reduzir", o valor fica igual', mantem.valores['2024-03'], 1000);
+}
 // 25) Honorários sem uma série na base, pagamento só numa série e acordo com a série agrupada
 {
   const sA = serie('A', 'Aluguel', '2024-01', '2024-02', 1000), sC = serie('C', 'Condomínio', '2024-01', '2024-02', 500);
