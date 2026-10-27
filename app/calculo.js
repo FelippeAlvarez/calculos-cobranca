@@ -193,6 +193,17 @@ function parcelasDosItens(c, ctx) {
     lista.push(novaParcela({ itemId: it.id, grupo: 'rubrica', rotulo: it.descricao || 'Rubrica', P0: Number(it.valor),
       corrDesde: it.corrDesde || '', jurosDesde: it.jurosDesde || '', regimes: regimesDoItem(it, c), multaPct: it.multa }));
   }
+  // Séries mensais (aluguéis, cotas, alimentos…): cada mês é uma verba, com correção desde o próprio vencimento e
+  // juros desde o vencimento (mora automática) ou desde uma data única; os critérios e a multa são os da série
+  for (const s of c.series || []) {
+    const regs = regimesDeCrit(s.crit || critPadrao());
+    for (const m of s.meses || []) {
+      if (m.pago || !(Number(m.valor) > 0) || !m.vencimento) continue;
+      lista.push(novaParcela({ itemId: m.id, serie: s.id, grupo: 'rubrica', rotulo: `${s.descricao || 'Prestação'} ${mesNum(m.competencia || m.vencimento.slice(0, 7))}`,
+        P0: Number(m.valor), corrDesde: m.vencimento, jurosDesde: s.juros === 'data' ? s.jurosData || '' : s.juros === 'nenhum' ? '' : m.vencimento,
+        regimes: regs, multaPct: s.multa, data: m.vencimento }));
+    }
+  }
   for (const it of c.custas || []) {
     const corr = it.corrDesde || it.data || '';
     if (!(Number(it.valor) > 0) || !corr) continue;
@@ -229,7 +240,8 @@ function parcelasHonorarios(c, base) {
       // Uma "sombra" de cada item da base, com as mesmas regras: acompanha a condenação, mas não as amortizações dela
       const sel = h.rubricas?.length ? new Set(h.rubricas) : null, fora = new Set(h.fora || []);
       for (const u of base) {
-        const entra = u.grupo === 'rubrica' ? (!sel || sel.has(u.itemId)) && !fora.has(u.itemId) : u.grupo === 'custas' ? !!h.baseCustas : u.grupo === 'multa' ? !!h.baseMultas : false;
+        const entra = u.grupo === 'rubrica' ? (u.serie ? !fora.has('serie:' + u.serie) : (!sel || sel.has(u.itemId)) && !fora.has(u.itemId))
+          : u.grupo === 'custas' ? !!h.baseCustas : u.grupo === 'multa' ? !!h.baseMultas : false;
         if (!entra) continue;
         lista.push(novaParcela({ itemId: h.id, grupo: 'honorarios', rotulo, P0: u.P0 * pct / 100, multaPct: u.multaPct,
           corrDesde: u.corrDesde, jurosDesde: u.jurosDesde, regimes: u.regimes, data: u.data, sombra: true }));
@@ -244,7 +256,8 @@ function parcelasHonorarios(c, base) {
         outras.push(`${o.descricao || 'outra base'} (${fmtMoeda(o.valor)}; ${u.corrDesde ? 'correção desde ' + fmtData(u.corrDesde) : 'sem correção'}; ${u.jurosDesde ? 'juros desde ' + fmtData(u.jurosDesde) : 'sem juros'}; ${descRegimes(u.regimes, !!u.jurosDesde)})`);
       }
       // Texto da base para a memória de cálculo
-      const nomes = [...base.filter(u => u.grupo === 'rubrica' && (!sel || sel.has(u.itemId)) && !fora.has(u.itemId)).map(u => u.rotulo),
+      const nomes = [...new Set(base.filter(u => u.grupo === 'rubrica' && (u.serie ? !fora.has('serie:' + u.serie) : (!sel || sel.has(u.itemId)) && !fora.has(u.itemId)))
+        .map(u => u.serie ? (c.series || []).find(s => s.id === u.serie)?.descricao + ' (prestações mensais)' : u.rotulo)),
         h.baseCustas && 'custas e despesas', h.baseMultas && 'multas processuais'].filter(Boolean);
       const nota = `Base: ${[nomes.length ? nomes.join(', ') + ', com os critérios de correção, juros e multa de cada item' : '', ...outras].filter(Boolean).join('; ') || 'nenhum item'}.`;
       lista.filter(u => u.itemId === h.id).forEach(u => { u.notaHon = nota; });
@@ -273,7 +286,7 @@ function imputar(u, X, d, imputacao, ctx, reg) {
   let xb = X / f;
   const ordem = imputacao === 'principal' ? ['Pb', 'Jb', 'Mb'] : ['Jb', 'Mb', 'Pb'];
   const nomes = { Pb: 'principal', Jb: 'juros', Mb: 'multa' };
-  const linha = { rotulo: u.rotulo, itemId: u.itemId, principal: 0, juros: 0, multa: 0 };
+  const linha = { rotulo: u.rotulo, itemId: u.itemId, serie: u.grupo === 'rubrica' ? u.serie : undefined, principal: 0, juros: 0, multa: 0 };
   for (const k of ordem) {
     const v = Math.min(u[k], xb);
     if (v <= 0) continue;
@@ -352,7 +365,8 @@ function calcular(c, dataCalc) {
       if (X > 0.005) X = distribuir(vivos.filter(u => u.grupo !== 'custas' && saldoBase(u) > 1e-9), X, d, a.imputacao, ctx, reg);
     }
     else {
-      const alvo = dest.startsWith('grupo:') ? vivos.filter(u => u.grupo === dest.slice(6)) : vivos.filter(u => u.itemId === dest);
+      const alvo = dest.startsWith('grupo:') ? vivos.filter(u => u.grupo === dest.slice(6))
+        : dest.startsWith('serie:') ? vivos.filter(u => u.serie === dest.slice(6)) : vivos.filter(u => u.itemId === dest);
       X = distribuir(alvo, X, d, a.imputacao, ctx, reg);
       if (X > 0.005) X = emOrdem(vivos.filter(u => saldoBase(u) > 1e-9), X, d, a.imputacao, ctx, reg);
     }
@@ -378,7 +392,7 @@ function calcular(c, dataCalc) {
     const f = fatorParcela(u, dataCalc, ctx.faltando);
     let it = itens.find(x => x.itemId === u.itemId);
     if (!it) {
-      it = { itemId: u.itemId, grupo: u.grupo, rotulo: u.rotulo, data: u.data, original: 0, corrigidoBruto: 0, principal: 0, juros: 0, multa: 0, pago: 0, total: 0, parcelas: [] };
+      it = { itemId: u.itemId, serie: u.grupo === 'rubrica' ? u.serie : undefined, grupo: u.grupo, rotulo: u.rotulo, data: u.data, original: 0, corrigidoBruto: 0, principal: 0, juros: 0, multa: 0, pago: 0, total: 0, parcelas: [] };
       itens.push(it);
     }
     it.parcelas.push(u);
@@ -413,6 +427,7 @@ function calcular(c, dataCalc) {
 
   return {
     c, dataCalc, itens, grupos, amort, r523, subtotal, pctContr, honContr, temPagamento,
+    aVencer: (c.series || []).flatMap(s => s.meses || []).filter(m => !m.pago && Number(m.valor) > 0 && m.vencimento > dataCalc).length,
     excedente: r2(excedente), total: r2(subtotal + honContr),
     faltando: [...ctx.faltando].sort(), estimados: [...ctx.estimados].sort(),
   };
@@ -470,6 +485,7 @@ function descItem(it) {
 
 function notasCalculo(r) {
   const n = [];
+  if (r.aVencer) n.push(`Não incluída(s) ${r.aVencer} prestação(ões) mensal(is) com vencimento depois de ${fmtData(r.dataCalc)} (a vencer).`);
   if (r.faltando.length) n.push('Atenção: índice ou taxa não disponível para ' + r.faltando.join(', ') + ' (não considerado no cálculo).');
   if (r.estimados.length) n.push('Taxa ainda não divulgada, estimada pela última disponível: ' + r.estimados.join('; ') + '.');
   if (r.excedente) n.push(`Os pagamentos excederam o débito existente nas respectivas datas em ${fmtMoeda(r.excedente)} (valor nominal), não abatidos de outros itens.`);

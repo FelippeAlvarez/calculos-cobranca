@@ -51,7 +51,20 @@ function calcularAcordo(c, a) {
   const data = a.data;
   const r = calcular(c, data);
   // Itens do débito na data do acordo (com os honorários contratuais, no extrajudicial)
-  const itens = r.itens.filter(it => it.total > 0).map(it => ({ itemId: it.itemId, grupo: it.grupo, rotulo: it.rotulo, total: it.total }));
+  // As prestações de cada série mensal entram juntas, num item só (desconto por série)
+  const itens = [];
+  for (const it of r.itens.filter(x => x.total > 0)) {
+    if (!it.serie) { itens.push({ itemId: it.itemId, grupo: it.grupo, rotulo: it.rotulo, total: it.total }); continue; }
+    let s = itens.find(x => x.itemId === 'serie:' + it.serie);
+    if (!s) {
+      const serie = (c.series || []).find(x => x.id === it.serie);
+      s = { itemId: 'serie:' + it.serie, grupo: 'rubrica', rotulo: serie?.descricao || 'Prestações mensais', total: 0, meses: 0 };
+      itens.push(s);
+    }
+    s.total = r2(s.total + it.total);
+    s.meses++;
+  }
+  itens.forEach(it => { if (it.meses) it.rotulo += ` (${it.meses} ${it.meses > 1 ? 'prestações mensais' : 'prestação mensal'})`; });
   if (r.honContr) itens.push({ itemId: 'honContr', grupo: 'honorarios', rotulo: `Honorários advocatícios contratuais (${fmtPct(r.pctContr)}%)`, total: r.honContr });
   const debito = itens.reduce((s, it) => s + cent(it.total), 0) / 100;
 

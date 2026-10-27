@@ -1,7 +1,7 @@
 'use strict';
 /* Cálculos de Cobrança — dados, telas e editor dos cálculos */
 
-const VERSAO = '1.5.0';
+const VERSAO = '1.6.0';
 
 /* ================= Dados ================= */
 const D = { config: null, indices: null, credores: {}, calculos: {}, carregadoEm: 0 };
@@ -361,6 +361,7 @@ function migrarCalculo(c) {
     if (h.rubricas?.length) { h.fora = c.rubricas.filter(r => !h.rubricas.includes(r.id)).map(r => r.id); h.rubricas = []; }
     h.fora = h.fora || [];
   }
+  c.series = c.series || [];
   delete c.regimes;
   if (c.art523) { delete c.art523.data; delete c.art523.base; delete c.art523.indice; }
 }
@@ -422,10 +423,12 @@ function telaCalculo(id, params) {
 
   <div class="cartao"><div class="cartao-cab"><h2>Devedores</h2><button class="bt pequeno" id="btAddDev">+ Adicionar devedor</button></div><div id="devedores"></div></div>
 
-  <div class="cartao"><div class="cartao-cab"><h2>Verbas (condenação / débito)</h2><button class="bt pequeno" id="btAddRub">+ Adicionar verba</button></div>
+  <div class="cartao"><div class="cartao-cab"><h2>Verbas (condenação / débito)</h2><div class="acoes"><button class="bt pequeno" id="btAddRub">+ Adicionar verba</button><button class="bt pequeno" id="btSeq">Lançar meses em sequência</button><button class="bt pequeno" id="btImpSeries">Importar planilha</button></div></div>
     <p class="dica">Uma linha por verba, com os próprios termos iniciais e critérios. Ex.: danos morais com correção desde o arbitramento (Súmula 362 do STJ) e juros desde o evento danoso (Súmula 54 do STJ); danos materiais com correção desde o efetivo prejuízo (Súmula 43 do STJ). Juros desde em branco: sem juros.
       <b>Lei 14.905</b>: a partir de 30/08/2024, correção pelo IPCA e juros pela taxa legal. <a href="#" id="sugVerbas">Editar as sugestões de descrição</a></p>
-    <div class="rolagem"><table class="tabela tabela-edit tabela-verbas"><thead><tr><th>Verba</th><th class="num">Valor (R$)</th><th>Correção desde</th><th>Juros desde</th>${CAB_CRIT}<th class="num">Multa %</th><th></th></tr></thead><tbody id="rubricas"></tbody></table></div></div>
+    <div class="rolagem"><table class="tabela tabela-edit tabela-verbas"><thead><tr><th>Verba</th><th class="num">Valor (R$)</th><th>Correção desde</th><th>Juros desde</th>${CAB_CRIT}<th class="num">Multa %</th><th></th></tr></thead><tbody id="rubricas"></tbody></table></div>
+    <div id="series"></div>
+    <p class="dica">Prestações mensais (aluguel, cota condominial, IPTU, alimentos, honorários de partido…): use "Lançar meses em sequência" ou "Importar planilha". Cada rubrica forma uma série, e o mesmo mês pode ter várias séries.</p></div>
 
   <div class="cartao"><div class="cartao-cab"><h2>Custas e despesas</h2><button class="bt pequeno" id="btAddCus">+ Adicionar</button></div>
     <p class="dica">Uma linha por despesa: correção em geral desde o desembolso; juros só se indicar o termo inicial. Para não corrigir, escolha o índice "Nenhum".
@@ -465,7 +468,7 @@ function telaCalculo(id, params) {
   <div class="cartao destaque"><div class="cartao-cab"><h2>Cálculo</h2><label class="inline">Atualizar até <input type="date" id="calcData" value="${hoje()}"></label></div>
     <div class="colunas2"><div id="calcResumo" class="resumo"></div><div id="calcAvisos"></div></div>
     <details class="detalhes"><summary>Ver o cálculo de cada item</summary><div id="calcDet"></div></details>
-    <div class="acoes-linha"><button class="bt" id="expVer">Visualizar PDF</button><button class="bt" id="expPdf">Salvar PDF</button><button class="bt" id="expXlsx">Salvar Excel</button></div>
+    <div class="acoes-linha"><label class="inline ordem-verbas">Prestações mensais <select id="ordemVerbas" style="width:auto"><option value="mes">por mês</option><option value="rubrica">por rubrica</option></select></label><button class="bt" id="expVer">Visualizar PDF</button><button class="bt" id="expPdf">Salvar PDF</button><button class="bt" id="expXlsx">Salvar Excel</button></div>
   </div>
 
   <div class="cartao"><div class="cartao-cab"><h2>Simulações de acordo</h2><button class="bt pequeno" id="btAcordo">Simular acordo</button></div>
@@ -607,7 +610,8 @@ function telaCalculo(id, params) {
         <div class="campo hon-remover"><button type="button" class="bt pequeno perigo" data-h-remover>Remover</button></div>
       </div>
       ${h.forma === 'condenacao' ? `<div class="campo"><label>Base de cálculo</label>
-        <div class="opcoes-linha">${c.rubricas.map(r => `<label class="inline"><input type="checkbox" data-hb="${r.id}" ${(h.fora || []).includes(r.id) ? '' : 'checked'}> ${esc(r.descricao || 'Verba sem nome')}</label>`).join('') || '<span class="dica">Lance as verbas acima.</span>'}
+        <div class="opcoes-linha">${c.rubricas.map(r => `<label class="inline"><input type="checkbox" data-hb="${r.id}" ${(h.fora || []).includes(r.id) ? '' : 'checked'}> ${esc(r.descricao || 'Verba sem nome')}</label>`).join('')
+          + c.series.map(s => `<label class="inline"><input type="checkbox" data-hb="serie:${s.id}" ${(h.fora || []).includes('serie:' + s.id) ? '' : 'checked'}> ${esc(s.descricao || 'Série')} (mensal)</label>`).join('') || '<span class="dica">Lance as verbas acima.</span>'}
           <label class="inline"><input type="checkbox" data-h="baseCustas" ${h.baseCustas ? 'checked' : ''}> Custas e despesas</label>
           <label class="inline"><input type="checkbox" data-h="baseMultas" ${h.baseMultas ? 'checked' : ''}> Multas processuais</label></div></div>
         <div class="cartao-cab" style="margin-top:6px"><b>Outras bases</b><button type="button" class="bt pequeno" data-h-outra>+ Outra base</button></div>
@@ -625,7 +629,7 @@ function telaCalculo(id, params) {
         alterado();
       }));
       $$('[data-hb]', q).forEach(b => b.addEventListener('change', () => {
-        h.fora = c.rubricas.filter(r => !$(`[data-hb="${r.id}"]`, q).checked).map(r => r.id);
+        h.fora = $$('[data-hb]', q).filter(b => !b.checked).map(b => b.dataset.hb);
         alterado();
       }));
       $('[data-h-remover]', q).addEventListener('click', () => {
@@ -725,6 +729,7 @@ function telaCalculo(id, params) {
       ['custasPrimeiro', 'Custas e despesas primeiro; depois as demais verbas']];
     const SO = { rubrica: 'Só as verbas (condenação)', custas: 'Só custas e despesas', honorarios: 'Só honorários sucumbenciais', multa: 'Só multas processuais' };
     const grupos = ['rubrica', 'custas', ...(c.tipo === 'judicial' ? ['honorarios', 'multa'] : [])].map(g => ['grupo:' + g, SO[g]]);
+    c.series.forEach(s => grupos.push(['serie:' + s.id, 'Só a série: ' + (s.descricao || '—')]));
     const itens = [];
     c.rubricas.forEach(r => itens.push([r.id, 'Verba: ' + (r.descricao || '—')]));
     c.custas.forEach(x => itens.push([x.id, 'Custas: ' + (x.descricao || fmtData(x.corrDesde) || '—')]));
@@ -761,7 +766,14 @@ function telaCalculo(id, params) {
   }
   $('#btAddAmo').addEventListener('click', () => { c.amortizacoes.push({ id: novoId(), data: hoje(), valor: 0, imputacao: 'juros', destino: 'proporcional', descricao: '', noPrazo: false }); desenharAmortizacoes(); marcarSujo(); });
 
-  function desenharTudo() { desenharRubricas(); desenharCustas(); desenharHonorarios(); desenharMultas(); desenharAmortizacoes(); }
+  // ---- Séries mensais
+  const seriesAbertas = new Set();
+  const desenharSeriesCalc = () => desenharSeries($('#series'), c, { alterado, abertas: seriesAbertas,
+    mudouEstrutura: () => { desenharSeriesCalc(); desenharHonorarios(); desenharAmortizacoes(); } });
+  $('#btSeq').addEventListener('click', () => janelaSequencia(c, critNovo(c.rubricas), () => { desenharTudo(); alterado(); }));
+  $('#btImpSeries').addEventListener('click', () => janelaImportarSeries(c, critNovo(c.rubricas), () => { desenharTudo(); alterado(); }));
+
+  function desenharTudo() { desenharSeriesCalc(); desenharRubricas(); desenharCustas(); desenharHonorarios(); desenharMultas(); desenharAmortizacoes(); }
   desenharTudo();
 
   // ---- Cálculo
@@ -770,6 +782,7 @@ function telaCalculo(id, params) {
   function recalcular() {
     const data = $('#calcData').value;
     if (!ehData(data)) return;
+    $('.ordem-verbas').hidden = !c.series.length;
     const r = calcular(c, data);
     $('#calcResumo').innerHTML = itensResumo(r).map(([rot, v, e]) => `<div class="res-l ${e === 'f' ? 'final' : e === 'b' ? 'dest' : ''}"><span>${esc(rot)}</span><b>${fmtMoeda(v)}</b></div>`).join('')
       || '<p class="vazio">Lance as verbas para ver o cálculo.</p>';
@@ -788,7 +801,7 @@ function telaCalculo(id, params) {
     const data = $('#calcData').value;
     if (!ehData(data)) throw new Error('Informe a data do cálculo.');
     await garantirIndices();
-    await exportarCalculo(formato, c, data);
+    await exportarCalculo(formato, c, data, { ordem: $('#ordemVerbas').value });
   });
   $('#expVer').addEventListener('click', () => exportar('ver'));
   $('#expPdf').addEventListener('click', () => exportar('pdf'));
@@ -802,7 +815,9 @@ function telaCalculo(id, params) {
     if (!c.devedores.some(d => d.nome)) throw new Error('Informe o devedor.');
     const ruins = datasInvalidas(c);
     if (ruins.length) throw new Error('Data inválida (confira o ano): ' + ruins.join('; ') + '.');
-    const semCorr = [...c.rubricas, ...c.custas].filter(x => Number(x.valor) > 0 && !x.corrDesde && !x.jurosDesde);
+    const semVenc = c.series.flatMap(s => s.meses.filter(m => Number(m.valor) > 0 && !ehData(m.vencimento)).map(() => s.descricao));
+    if (semVenc.length) throw new Error(`Há ${semVenc.length} mês(es) sem vencimento válido na(s) série(s): ${[...new Set(semVenc)].join(', ')}.`);
+    const semCorr =[...c.rubricas, ...c.custas].filter(x => Number(x.valor) > 0 && !x.corrDesde && !x.jurosDesde);
     if (semCorr.length) throw new Error(`Informe o termo inicial da correção e/ou dos juros de: ${semCorr.map(x => x.descricao || 'linha sem descrição').join(', ')}.`);
     const semDesc = c.rubricas.filter(x => Number(x.valor) > 0 && !x.descricao);
     if (semDesc.length) throw new Error('Há verba sem descrição.');
@@ -842,6 +857,10 @@ function datasInvalidas(c) {
   const ver = (v, onde) => { if (v && !ehData(v)) out.push(`${onde} (${fmtData(v)})`); };
   ver(c.valorCausa?.data, 'Data do ajuizamento');
   (c.rubricas || []).forEach(x => { ver(x.corrDesde, x.descricao || 'Verba'); ver(x.jurosDesde, x.descricao || 'Verba'); });
+  (c.series || []).forEach(s => {
+    if (s.juros === 'data') ver(s.jurosData, s.descricao);
+    (s.meses || []).forEach(m => ver(m.vencimento, `${s.descricao} ${mesNum(m.competencia)}`));
+  });
   (c.custas || []).forEach(x => { ver(x.corrDesde, x.descricao || 'Custas'); ver(x.jurosDesde, x.descricao || 'Custas'); });
   (c.honorarios || []).forEach(x => {
     ver(x.data, rotuloHonorario(x)); ver(x.jurosDesde, rotuloHonorario(x));
@@ -868,7 +887,7 @@ function tabelasDetalheHTML(r) {
 function tabelaAmortHTML(r) {
   return `<div class="rolagem"><table class="tabela"><thead><tr><th>Data</th><th class="num">Valor pago</th><th class="num">Débito na data</th><th>Imputação</th><th class="num">Saldo após</th></tr></thead><tbody>
     ${r.amort.map(a => `<tr><td>${fmtData(a.data)}${a.a.descricao ? `<div class="dica">${esc(a.a.descricao)}</div>` : ''}</td><td class="num">${fmtNum(a.valor)}</td><td class="num">${fmtNum(a.antes)}</td>
-      <td>${a.imputado.map(l => `${esc(l.rotulo)}: ${[l.juros > 0.004 ? 'juros ' + fmtNum(l.juros) : '', l.multa > 0.004 ? 'multa ' + fmtNum(l.multa) : '', l.principal > 0.004 ? 'principal ' + fmtNum(l.principal) : ''].filter(Boolean).join(', ')}`).join('<br>')}${a.sobra ? `<br><b>Excedente: ${fmtNum(a.sobra)}</b>` : ''}</td>
+      <td>${linhasImputadas(a, r.c).map(l => `${esc(l.rotulo)}: ${[l.juros > 0.004 ? 'juros ' + fmtNum(l.juros) : '', l.multa > 0.004 ? 'multa ' + fmtNum(l.multa) : '', l.principal > 0.004 ? 'principal ' + fmtNum(l.principal) : ''].filter(Boolean).join(', ')}`).join('<br>')}${a.sobra ? `<br><b>Excedente: ${fmtNum(a.sobra)}</b>` : ''}</td>
       <td class="num">${fmtNum(a.depois)}</td></tr>`).join('')}</tbody></table></div>`;
 }
 

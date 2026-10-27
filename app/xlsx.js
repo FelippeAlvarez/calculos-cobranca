@@ -149,3 +149,197 @@ function imagemDeDataURL(url) {
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
   return { ext: m[1].toLowerCase() === 'png' ? 'png' : 'jpeg', bytes };
 }
+
+/* ================= Leitura de planilhas (.xlsx e .csv) ================= */
+async function descompactar(bytes) {
+  const ds = new DecompressionStream('deflate-raw');
+  const stream = new Blob([bytes]).stream().pipeThrough(ds);
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+// Lê os arquivos de um .zip (o .xlsx é um zip): devolve { nome: Uint8Array } (só os pedidos por "filtro")
+async function lerZip(buf, filtro = () => true) {
+  const b = new Uint8Array(buf), v = new DataView(buf);
+  let fim = -1;
+  for (let i = b.length - 22; i >= Math.max(0, b.length - 65557); i--) if (v.getUint32(i, true) === 0x06054b50) { fim = i; break; }
+  if (fim < 0) throw new Error('Arquivo inválido: não é uma planilha .xlsx. Planilhas antigas (.xls) precisam ser salvas antes como .xlsx no Excel (Arquivo > Salvar como).');
+  const qtd = v.getUint16(fim + 10, true);
+  let p = v.getUint32(fim + 16, true);
+  const dec = new TextDecoder(), saida = {};
+  for (let k = 0; k < qtd; k++) {
+    if (v.getUint32(p, true) !== 0x02014b50) break;
+    const metodo = v.getUint16(p + 10, true), tamC = v.getUint32(p + 20, true);
+    const nl = v.getUint16(p + 28, true), el = v.getUint16(p + 30, true), cl = v.getUint16(p + 32, true);
+    const off = v.getUint32(p + 42, true);
+    const nome = dec.decode(b.subarray(p + 46, p + 46 + nl));
+    p += 46 + nl + el + cl;
+    if (!filtro(nome)) continue;
+    const ini = off + 30 + v.getUint16(off + 26, true) + v.getUint16(off + 28, true);
+    const dados = b.subarray(ini, ini + tamC);
+    saida[nome] = metodo === 0 ? dados : metodo === 8 ? await descompactar(dados) : null;
+  }
+  return saida;
+}
+
+const xmlDe = bytes => new DOMParser().parseFromString(new TextDecoder().decode(bytes), 'application/xml');
+const textoNo = n => [...n.getElementsByTagName('t')].filter(t => t.parentNode.nodeName !== 'rPh').map(t => t.textContent).join('');
+function colunaNum(ref) { let n = 0; for (const ch of ref.replace(/\d+/g, '')) n = n * 26 + ch.charCodeAt(0) - 64; return n - 1; }
+const isoDeSerial = s => { const d = new Date(Date.UTC(1899, 11, 30) + Math.round(s * 864e5)); return d.toISOString().slice(0, 10); };
+
+// Devolve { folhas: [{ nome, linhas: [[célula]] }] }; datas vêm como 'AAAA-MM-DD', números como number
+async function lerPlanilha(arquivo) {
+  const nomeArq = arquivo.name.toLowerCase();
+  if (nomeArq.endsWith('.csv') || nomeArq.endsWith('.txt')) return { folhas: [{ nome: arquivo.name, linhas: lerCSV(await arquivo.text()) }] };
+  if (nomeArq.endsWith('.pdf')) return { folhas: [{ nome: arquivo.name, linhas: await lerPDFTabela(arquivo) }] };
+  if (nomeArq.endsWith('.xls')) throw new Error('Planilhas no formato antigo (.xls) precisam ser salvas antes como .xlsx no Excel (Arquivo > Salvar como > Pasta de Trabalho do Excel).');
+  const z = await lerZip(await arquivo.arrayBuffer(), n => n.startsWith('xl/') && n.endsWith('.xml') || n.endsWith('.rels'));
+  if (!z['xl/workbook.xml']) throw new Error('Não foi possível ler a planilha (formato não reconhecido).');
+  const wb = xmlDe(z['xl/workbook.xml']);
+  const rels = {};
+  if (z['xl/_rels/workbook.xml.rels']) for (const r of xmlDe(z['xl/_rels/workbook.xml.rels']).getElementsByTagName('Relationship')) rels[r.getAttribute('Id')] = r.getAttribute('Target');
+  const compart = z['xl/sharedStrings.xml'] ? [...xmlDe(z['xl/sharedStrings.xml']).getElementsByTagName('si')].map(textoNo) : [];
+  // Estilos com formato de data
+  const ehDataFmt = new Set();
+  if (z['xl/styles.xml']) {
+    const st = xmlDe(z['xl/styles.xml']), custom = {};
+    for (const f of st.getElementsByTagName('numFmt')) custom[f.getAttribute('numFmtId')] = f.getAttribute('formatCode');
+    const xfs = st.getElementsByTagName('cellXfs')[0];
+    if (xfs) [...xfs.getElementsByTagName('xf')].forEach((xf, i) => {
+      const id = +xf.getAttribute('numFmtId');
+      const cod = (custom[id] || '').replace(/"[^"]*"|\[[^\]]*\]|\./g, '');
+      if ((id >= 14 && id <= 22) || (id >= 45 && id <= 47) || /[dy]/i.test(cod) || /m{1,4}.*[dy]|[dy].*m/i.test(cod)) ehDataFmt.add(i);
+    });
+  }
+  const folhas = [];
+  for (const sh of wb.getElementsByTagName('sheet')) {
+    const rid = sh.getAttribute('r:id') || sh.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id');
+    let alvo = rels[rid] || '';
+    alvo = alvo.startsWith('/') ? alvo.slice(1) : 'xl/' + alvo.replace(/^\.\//, '');
+    if (!z[alvo]) continue;
+    const linhas = [];
+    for (const row of xmlDe(z[alvo]).getElementsByTagName('row')) {
+      const ri = +row.getAttribute('r') - 1;
+      const lin = linhas[ri] = [];
+      for (const c of row.getElementsByTagName('c')) {
+        const t = c.getAttribute('t'), s = +c.getAttribute('s') || 0;
+        const vNo = c.getElementsByTagName('v')[0], v = vNo ? vNo.textContent : null;
+        let val = null;
+        if (t === 's') val = compart[+v] ?? '';
+        else if (t === 'inlineStr') val = textoNo(c);
+        else if (t === 'str' || t === 'e') val = v ?? '';
+        else if (t === 'b') val = v === '1' ? 'VERDADEIRO' : 'FALSO';
+        else if (v !== null && v !== '') { val = Number(v); if (ehDataFmt.has(s) && val > 0 && val < 2958466) val = isoDeSerial(val); }
+        lin[colunaNum(c.getAttribute('r'))] = val;
+      }
+    }
+    for (let i = 0; i < linhas.length; i++) linhas[i] = linhas[i] || [];
+    folhas.push({ nome: sh.getAttribute('name'), linhas });
+  }
+  return { folhas };
+}
+
+function lerCSV(texto) {
+  // Separador: o mais frequente nas primeiras linhas (a primeira pode ser só um título)
+  const inicio = texto.split(/\r?\n/, 15);
+  const sep = ['\t', ';', ','].map(s => [s, Math.max(...inicio.map(l => l.split(s).length))]).sort((a, b) => b[1] - a[1])[0][0];
+  const linhas = [];
+  let lin = [], campo = '', aspas = false;
+  for (let i = 0; i < texto.length; i++) {
+    const ch = texto[i];
+    if (aspas) {
+      if (ch === '"') { if (texto[i + 1] === '"') { campo += '"'; i++; } else aspas = false; } else campo += ch;
+    } else if (ch === '"') aspas = true;
+    else if (ch === sep) { lin.push(campo); campo = ''; }
+    else if (ch === '\n' || ch === '\r') {
+      if (ch === '\r' && texto[i + 1] === '\n') i++;
+      lin.push(campo); linhas.push(lin); lin = []; campo = '';
+    } else campo += ch;
+  }
+  if (campo || lin.length) { lin.push(campo); linhas.push(lin); }
+  return linhas;
+}
+
+/*
+  PDF com texto (gerado por sistema, não escaneado): reconstrói a tabela pela posição do texto.
+  1) junta os pedaços de texto em linhas (mesma altura na página);
+  2) junta os pedaços próximos de uma linha em células;
+  3) define as colunas pelas faixas horizontais ocupadas pelas células das linhas com números ou datas;
+  4) encaixa cada célula na coluna com que mais se sobrepõe.
+*/
+async function lerPDFTabela(arquivo) {
+  await carregarPdfJs();
+  let pdf;
+  try { pdf = await pdfjsLib.getDocument({ data: new Uint8Array(await arquivo.arrayBuffer()) }).promise; }
+  catch (e) { throw new Error('Não foi possível abrir o PDF' + (e?.name === 'PasswordException' ? ' (protegido por senha).' : '.')); }
+  const linhas = [];
+  for (let n = 1; n <= pdf.numPages; n++) {
+    const pg = await pdf.getPage(n);
+    const tc = await pg.getTextContent({ disableCombineTextItems: true });
+    const largPag = pg.getViewport({ scale: 1 }).width;
+    const itens = [];
+    for (const it of tc.items) {
+      if (!it.str || !it.str.trim()) continue;
+      const h = Math.abs(it.transform[3]) || it.height || 8;
+      const x = it.transform[4], y = it.transform[5], w = it.width || it.str.length * h * 0.5;
+      // Texto com espaços largos dentro do mesmo pedaço: separa, estimando a posição pelo nº de caracteres
+      const partes = it.str.split(/(\s{3,})/);
+      let pos = 0;
+      for (const p of partes) {
+        const ini = x + w * pos / it.str.length;
+        pos += p.length;
+        if (p.trim()) itens.push({ x: ini, x1: x + w * pos / it.str.length, y, h, s: p.trim() });
+      }
+    }
+    itens.sort((a, b) => b.y - a.y || a.x - b.x);
+    const grupos = [];
+    for (const it of itens) {
+      const g = grupos[grupos.length - 1];
+      if (g && Math.abs(g.y - it.y) <= Math.max(2, it.h * 0.45)) g.itens.push(it); else grupos.push({ y: it.y, itens: [it] });
+    }
+    for (const g of grupos) {
+      g.itens.sort((a, b) => a.x - b.x);
+      const cels = [];
+      for (const it of g.itens) {
+        const c = cels[cels.length - 1];
+        const vao = c ? it.x - c.x1 : Infinity;
+        if (c && vao <= Math.max(1.5, it.h * 0.6)) { c.s += (vao > it.h * 0.12 ? ' ' : '') + it.s; c.x1 = Math.max(c.x1, it.x1); }
+        else cels.push({ x0: it.x, x1: it.x1, s: it.s });
+      }
+      cels.forEach(c => { c.largo = c.x1 - c.x0 > largPag * 0.3 || c.s.length > 45; });
+      linhas.push(cels);
+    }
+  }
+  if (!linhas.length) throw new Error('Este PDF não tem texto (provavelmente foi escaneado como imagem). Não é possível importar: peça o arquivo original ou em Excel.');
+
+  // Faixas das colunas. Linhas de dados: 2+ células só com número, valor ou data.
+  // As faixas vêm dessas células numéricas; depois as células de texto dessas linhas que não caem
+  // em nenhuma faixa formam colunas próprias (descrição, rubrica…).
+  const soNumero = s => /^[R$\s]*-?[\d.,/%-]+$/.test(s.trim()) && /\d/.test(s);
+  const dados = linhas.filter(l => l.filter(c => soNumero(c.s)).length >= 2);
+  const juntar = (cels, faixas) => {
+    for (const c of [...cels].sort((a, b) => a.x0 - b.x0)) {
+      const f = faixas.find(f => c.x0 < f.x1 - 0.5 && c.x1 > f.x0 + 0.5);
+      if (f) { f.x0 = Math.min(f.x0, c.x0); f.x1 = Math.max(f.x1, c.x1); } else faixas.push({ x0: c.x0, x1: c.x1 });
+    }
+    return faixas;
+  };
+  let faixas = juntar(dados.flat().filter(c => soNumero(c.s)), []);
+  const sobrepoe = c => faixas.some(f => c.x0 < f.x1 && c.x1 > f.x0);
+  faixas = juntar(dados.flat().filter(c => !soNumero(c.s) && !c.largo && !sobrepoe(c)), faixas).sort((a, b) => a.x0 - b.x0);
+  if (!faixas.length) return linhas.map(l => l.map(c => c.s));
+  const coluna = c => {
+    let melhor = 0, sobre = -Infinity;
+    faixas.forEach((f, j) => {
+      const s = Math.min(c.x1, f.x1) - Math.max(c.x0, f.x0); // sobreposição (negativa = distância)
+      if (s > sobre) { sobre = s; melhor = j; }
+    });
+    return melhor;
+  };
+  return linhas.map(l => {
+    const r = [];
+    for (const c of l) { const j = coluna(c); r[j] = r[j] ? r[j] + ' ' + c.s : c.s; }
+    for (let j = 0; j < r.length; j++) if (r[j] === undefined) r[j] = null;
+    return r;
+  });
+}
+

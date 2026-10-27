@@ -42,6 +42,19 @@ const MANUAL = [
     <p>Uma linha nova já vem com os critérios da linha anterior. Os critérios sugeridos para as primeiras linhas são os do credor ou, se ele não tiver, os das Configurações.</p>
     <p><b>Como o programa calcula:</b> a correção acumula os índices mensais do mês do termo inicial até o mês anterior ao do cálculo (como a Calculadora do Cidadão do Banco Central); a UFIR-RJ usa a divisão entre os valores anuais. Os juros são simples, pro rata die, sobre o valor corrigido.</p>`],
 
+  ['series', 'Prestações mensais (séries)', `
+    <p>Para débitos que vencem todo mês (aluguel, cota condominial, IPTU, alimentos, honorários de partido…), use, no quadro de verbas:</p>
+    <ul>
+      <li><b>Lançar meses em sequência</b>: rubrica, competências inicial e final, dia e mês do vencimento, valor mensal, multa, juros (desde cada vencimento, art. 397 do CC; desde uma data única, como a citação; ou sem juros) e os critérios de correção e juros da série.
+        Opcionalmente, <b>reajuste anual</b>: a cada aniversário (mês escolhido), o valor é reajustado pelo índice acumulado dos 12 meses anteriores (UFIR-RJ: valor do ano dividido pelo do ano anterior). A prévia mostra cada reajuste.</li>
+      <li><b>Importar planilha</b> (Excel, CSV ou PDF com texto): indique as colunas de competência, vencimento, valor e, se houver, rubrica. Cada rubrica vira uma série.</li>
+    </ul>
+    <p>Cada rubrica forma uma <b>série</b>, e o mesmo mês pode ter várias (aluguel, condomínio e IPTU de março, por exemplo). Lançar de novo a mesma rubrica acrescenta meses à série, sem repetir competências.
+      Clique no nome da série para ver os meses: ajuste o valor ou o vencimento de qualquer mês, inclua meses ou marque <b>Pago</b> para tirar o mês do cálculo sem apagá-lo. "Critérios" altera a rubrica, a multa, os juros e os critérios de toda a série.</p>
+    <p>Cada mês é corrigido desde o próprio vencimento. Meses que vencem depois da data do cálculo ficam de fora (a vencer), com aviso.
+      Nas planilhas, escolha ao lado dos botões de PDF e Excel se as prestações saem <b>por mês</b> (os itens do mesmo mês juntos, com subtotal) ou <b>por rubrica</b> (cada série com subtotal).
+      Nas amortizações, é possível abater de uma série só; na base dos honorários, cada série tem uma caixa; na simulação de acordo, cada série aparece numa linha.</p>`],
+
   ['custas', 'Custas e despesas', `
     <p>Uma linha por despesa, com descrição, valor, correção desde (em geral, a data do desembolso) e, se for o caso, juros desde. Os critérios são próprios de cada linha. Para não corrigir uma despesa, escolha o índice "Nenhum".</p>
     <p><b>Id. no processo</b> (opcional): o Id. do comprovante da despesa nos autos eletrônicos. Preenchido, aparece ao lado da descrição na tela, no PDF, no Excel e na simulação de acordo, por exemplo "Custas iniciais (Id. 123456789)".</p>

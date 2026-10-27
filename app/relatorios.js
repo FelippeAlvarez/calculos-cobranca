@@ -46,7 +46,20 @@ function textoArt523(r) {
     + (prazo ? ', descontados os pagamentos feitos no prazo (§ 2º).' : '. Os pagamentos posteriores ao prazo não reduzem a base.');
 }
 
-const textoImputado = a => a.imputado.map(l => `${l.rotulo}: ${[l.juros > 0.004 ? 'juros ' + fmtNum(l.juros) : '', l.multa > 0.004 ? 'multa ' + fmtNum(l.multa) : '', l.principal > 0.004 ? 'principal ' + fmtNum(l.principal) : ''].filter(Boolean).join(', ')}`).join('; ')
+// Linhas abatidas de um pagamento; as prestações de cada série mensal saem somadas numa linha
+function linhasImputadas(a, c) {
+  const out = [];
+  for (const l of a.imputado) {
+    if (!l.serie) { out.push(l); continue; }
+    let g = out.find(x => x.grupoSerie === l.serie);
+    if (!g) { g = { grupoSerie: l.serie, nome: (c?.series || []).find(s => s.id === l.serie)?.descricao || 'Prestações', n: 0, juros: 0, multa: 0, principal: 0 }; out.push(g); }
+    g.n++; g.juros += l.juros; g.multa += l.multa; g.principal += l.principal;
+  }
+  out.forEach(g => { if (g.grupoSerie) g.rotulo = `${g.nome} (${g.n} ${g.n > 1 ? 'prestações' : 'prestação'})`; });
+  return out;
+}
+
+const textoImputado = (a, c) => linhasImputadas(a, c).map(l => `${l.rotulo}: ${[l.juros > 0.004 ? 'juros ' + fmtNum(l.juros) : '', l.multa > 0.004 ? 'multa ' + fmtNum(l.multa) : '', l.principal > 0.004 ? 'principal ' + fmtNum(l.principal) : ''].filter(Boolean).join(', ')}`).join('; ')
   + (a.sobra ? `; excedente ${fmtNum(a.sobra)}` : '');
 const descImputacao = a => (a.a.imputacao === 'principal' ? 'principal primeiro' : 'juros primeiro (art. 354 do CC)');
 
@@ -66,7 +79,10 @@ function blocoInfoPDF(P, titulo, linhas) {
   P.y += h + 4;
 }
 
-function gerarPDFCalculo(c, dataCalc, nome) {
+// Soma de uma lista de itens (subtotais por mês ou por série)
+const somaItens = (l, k) => l.reduce((s, it) => s + cent(it[k]), 0) / 100;
+
+function gerarPDFCalculo(c, dataCalc, nome, opcoes = {}) {
   const r = calcular(c, dataCalc);
   const P = novoDocumento(true);
   P.cab();
@@ -83,14 +99,21 @@ function gerarPDFCalculo(c, dataCalc, nome) {
       { t: pg ? 'Principal corrigido (saldo)' : 'Valor corrigido', w: 21, a: 'r' }, { t: 'Juros desde', w: 17, nw: true }, { t: 'Juros acumulados', w: 15, a: 'r' },
       { t: 'Juros', w: 19, a: 'r' }, { t: 'Multa', w: 17, a: 'r' }, ...(pg ? [{ t: 'Pago (nominal)', w: 19, a: 'r' }] : []), { t: 'Total', w: 21, a: 'r' },
     ], [
-      ...g.itens.map(it => {
+      // Verbas: as prestações mensais saem por mês ou por rubrica, com subtotais; a nota de cada série sai uma vez só
+      ...(g.grupo === 'rubrica' ? linhasVerbasOrdenadas(g.itens, c, opcoes.ordem) : g.itens.map(it => ({ it }))).map(({ it, subtotal, itens }) => {
+        if (subtotal) return { c: [subtotal, fmtNum(somaItens(itens, 'original')), '', '', fmtNum(somaItens(itens, 'principal')), '', '', fmtNum(somaItens(itens, 'juros')), fmtNum(somaItens(itens, 'multa')), ...(pg ? [''] : []), fmtNum(somaItens(itens, 'total'))], italico: true };
         const u = it.parcelas[0];
-        notas.push(`(${++n}) ${it.rotulo}: ${descItem(it)}${c.rubricas.find(x => x.id === it.itemId)?.obs ? ' ' + c.rubricas.find(x => x.id === it.itemId).obs : ''}`);
-        return { c: [`(${n}) ${it.rotulo}`, fmtNum(it.original), u.sombra ? 'da base' : fmtData(u.corrDesde) || '—', it.fator ? fmtFator(it.fator) : '—', fmtNum(it.principal),
+        let rot = it.rotulo;
+        if (!it.serie) {
+          rot = `(${++n}) ${it.rotulo}`;
+          notas.push(`${rot}: ${descItem(it)}${c.rubricas.find(x => x.id === it.itemId)?.obs ? ' ' + c.rubricas.find(x => x.id === it.itemId).obs : ''}`);
+        }
+        return { c: [rot, fmtNum(it.original), u.sombra ? 'da base' : fmtData(u.corrDesde) || '—', it.fator ? fmtFator(it.fator) : '—', fmtNum(it.principal),
           u.sombra ? 'da base' : fmtData(u.jurosDesde) || '—', taxaTxt(it), fmtNum(it.juros), fmtNum(it.multa), ...(pg ? [it.pago ? fmtNum(it.pago) : ''] : []), fmtNum(it.total)] };
       }),
       { c: ['Subtotal', fmtNum(g.original), '', '', fmtNum(g.principal), '', '', fmtNum(g.juros), fmtNum(g.multa), ...(pg ? [''] : []), fmtNum(g.total)], total: true },
     ], 8);
+    if (g.grupo === 'rubrica') (c.series || []).filter(s => g.itens.some(it => it.serie === s.id)).forEach(s => notas.push(descSerie(s)));
     notas.forEach(t => { paragrafoPDF(P, t, 7.5, 'normal', COR_SUAVE); P.y += 0.6; });
     if (g.grupo === 'art523') paragrafoPDF(P, textoArt523(r), 7.5, 'normal', COR_SUAVE);
     P.y += 3;
@@ -99,7 +122,7 @@ function gerarPDFCalculo(c, dataCalc, nome) {
     subtituloPDF(P, 'Amortizações (pagamentos parciais)');
     tabelaPDF(P, [{ t: 'Data', w: 16, nw: true }, { t: 'Valor pago', w: 18, a: 'r' }, { t: 'Débito atualizado na data', w: 22, a: 'r' },
       { t: 'Imputação', w: 26 }, { t: 'Valores abatidos (atualizados na data)', w: 110 }, { t: 'Saldo após o pagamento', w: 22, a: 'r' }],
-    r.amort.map(a => ({ c: [fmtData(a.data) + (a.a.descricao ? ' - ' + a.a.descricao : ''), fmtNum(a.valor), fmtNum(a.antes), descImputacao(a), textoImputado(a), fmtNum(a.depois)] })), 7.5);
+    r.amort.map(a => ({ c: [fmtData(a.data) + (a.a.descricao ? ' - ' + a.a.descricao : ''), fmtNum(a.valor), fmtNum(a.antes), descImputacao(a), textoImputado(a, c), fmtNum(a.depois)] })), 7.5);
     paragrafoPDF(P, 'Em cada pagamento, o débito foi atualizado até a data do pagamento e o valor foi abatido conforme a imputação indicada; o saldo remanescente segue atualizado pelos mesmos critérios até a data do cálculo.', 7.5, 'normal', COR_SUAVE);
     P.y += 3;
   }
@@ -114,7 +137,7 @@ function gerarPDFCalculo(c, dataCalc, nome) {
 // Itens sem pagamentos, sem capitalização e com uma só parcela: fórmulas completas; os demais saem com os valores
 const itemComFormula = it => !it.pago && it.parcelas.length === 1 && !it.parcelas[0].sombra && !it.parcelas[0].regimes.some(g => g.capitalizar);
 
-function gerarXLSXCalculo(c, dataCalc) {
+function gerarXLSXCalculo(c, dataCalc, opcoes = {}) {
   const r = calcular(c, dataCalc);
   const LARG = [44, 15, 13, 13, 16, 13, 12, 14, 13, 14, 16], cab = cabecalhoXLSX(LARG);
   const mesclar = [];
@@ -126,7 +149,15 @@ function gerarXLSXCalculo(c, dataCalc) {
     L.push({ c: ['Item', 'Valor originário', 'Correção desde', 'Fator de correção', r.temPagamento ? 'Principal corrigido (saldo)' : 'Valor corrigido', 'Juros desde', 'Juros acumulados',
       'Juros', 'Multa', 'Pago (nominal)', 'Total'].map(v => ({ v, s: 'cab' })), altura: 30 });
     const ini = L.length + 1;
-    for (const it of g.itens) {
+    // Subtotais internos (por mês ou por série) usam SUBTOTAL, que o subtotal do grupo ignora
+    let bloco = L.length + 1;
+    for (const { it, subtotal, inicio } of (g.grupo === 'rubrica' ? linhasVerbasOrdenadas(g.itens, c, opcoes.ordem) : g.itens.map(it => ({ it })))) {
+      if (subtotal) {
+        const a = bloco, b = L.length, st = col => ({ f: `SUBTOTAL(9,${col}${a}:${col}${b})`, s: 'mt' });
+        L.push([{ v: subtotal, s: 'bt' }, st('B'), vz, vz, st('E'), vz, vz, st('H'), st('I'), vz, st('K')]);
+        continue;
+      }
+      if (inicio) bloco = L.length + 1;
       const u = it.parcelas[0], n = L.length + 1, f = itemComFormula(it);
       const pct = Number(u.multaPct) || 0;
       L.push([it.rotulo, { v: it.original, s: 'm' }, { v: u.sombra ? '' : u.corrDesde || '', s: 'd' }, { v: it.fator ?? '', s: 'f' },
@@ -136,7 +167,7 @@ function gerarXLSXCalculo(c, dataCalc) {
         f && pct ? { f: `ROUND(B${n}*D${n}*${pct / 100},2)`, v: it.multa, s: 'm' } : { v: it.multa, s: 'm' },
         { v: it.pago || '', s: 'm' }, { f: `E${n}+H${n}+I${n}`, v: it.total, s: 'm' }]);
     }
-    const fim = L.length, soma = (col, v) => ({ f: `SUM(${col}${ini}:${col}${fim})`, v, s: 'mt' });
+    const fim = L.length, soma = (col, v) => ({ f: `SUBTOTAL(9,${col}${ini}:${col}${fim})`, v, s: 'mt' });
     L.push([{ v: 'Subtotal', s: 'bt' }, soma('B', g.original), vz, vz, soma('E', g.principal), vz, vz, soma('H', g.juros), soma('I', g.multa), vz, soma('K', g.total)]);
     subtotais.push({ nome: g.nome, ref: 'K' + L.length, v: g.total });
     if (g.grupo === 'art523') { L.push({ c: [{ v: textoArt523(r), s: 'tq' }], altura: 28 }); mesclar.push(`A${L.length}:K${L.length}`); }
@@ -147,7 +178,7 @@ function gerarXLSXCalculo(c, dataCalc) {
     L.push({ c: ['Data', 'Valor pago', 'Débito na data', 'Imputação', 'Valores abatidos (atualizados na data)', null, null, null, null, null, 'Saldo após'].map(v => v === null ? { v: '', s: 'cab' } : { v, s: 'cab' }), altura: 30 });
     mesclar.push(`E${L.length}:J${L.length}`);
     for (const a of r.amort) {
-      L.push({ c: [{ v: a.data, s: 'd' }, { v: a.valor, s: 'm' }, { v: a.antes, s: 'm' }, descImputacao(a), { v: textoImputado(a), s: 'tq' }, null, null, null, null, null, { v: a.depois, s: 'm' }], altura: Math.max(15, Math.ceil(textoImputado(a).length / 90) * 13) });
+      L.push({ c: [{ v: a.data, s: 'd' }, { v: a.valor, s: 'm' }, { v: a.antes, s: 'm' }, descImputacao(a), { v: textoImputado(a, c), s: 'tq' }, null, null, null, null, null, { v: a.depois, s: 'm' }], altura: Math.max(15, Math.ceil(textoImputado(a, c).length / 90) * 13) });
       mesclar.push(`E${L.length}:J${L.length}`);
     }
     L.push(null);
@@ -164,7 +195,8 @@ function gerarXLSXCalculo(c, dataCalc) {
   return gerarXLSX([{ nome: 'Cálculo', linhas: L, larguras: LARG, imagem: cab.imagem, mesclar }]);
 }
 
-const notasItens = r => r.itens.map(it => `${it.rotulo}: ${descItem(it)}`);
+const notasItens = r => [...r.itens.filter(it => !it.serie).map(it => `${it.rotulo}: ${descItem(it)}`),
+  ...(r.c.series || []).filter(s => r.itens.some(it => it.serie === s.id)).map(descSerie)];
 
 // Logotipo no canto esquerdo das planilhas: tamanho em pixels e coluna onde começa o texto do cabeçalho
 function logoXLSX(larguras) {
@@ -190,9 +222,9 @@ function cabecalhoXLSX(larguras = []) {
   return { linhas, imagem: logo?.imagem || null };
 }
 
-async function exportarCalculo(formato, c, dataCalc) {
+async function exportarCalculo(formato, c, dataCalc, opcoes = {}) {
   const nome = nomeArquivo('Calculo', nomeCredorCurto(c).slice(0, 30), devedoresCurto(c).slice(0, 40), fmtData(dataCalc).replace(/\//g, '-'));
-  if (formato === 'xlsx') return salvarPlanilha(gerarXLSXCalculo(c, dataCalc), nome + '.xlsx');
-  const pdf = gerarPDFCalculo(c, dataCalc, nome);
+  if (formato === 'xlsx') return salvarPlanilha(gerarXLSXCalculo(c, dataCalc, opcoes), nome + '.xlsx');
+  const pdf = gerarPDFCalculo(c, dataCalc, nome, opcoes);
   return formato === 'ver' ? visualizarPDF(pdf) : salvarPDF(pdf);
 }
