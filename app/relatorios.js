@@ -129,8 +129,22 @@ function gerarPDFCalculo(c, dataCalc, nome, opcoes = {}) {
   subtituloPDF(P, 'Resumo');
   resumoPDF(P, itensResumo(r), 150);
   [NOTA_METODO, ...notasCalculo(r)].forEach(t => { paragrafoPDF(P, t, 7.5, 'normal', COR_SUAVE); P.y += 1; });
+  // Simulações de acordo escolhidas: no mesmo arquivo, cada uma a partir de uma página nova
+  for (const a of opcoes.acordos || []) {
+    P.novaPagina();
+    escreverPDFAcordo(P, calcularAcordo(c, a), dataCalc);
+  }
   rodapePDF(P);
   return { doc: P.doc, nome: nome + '.pdf' };
+}
+
+// Nome de aba do Excel: até 31 caracteres, sem [ ] : * ? / \ e sem repetir
+function nomeAba(base, usados) {
+  const limpo = base.replace(/[\[\]:*?/\\']/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 28) || 'Acordo';
+  let nome = limpo, i = 2;
+  while (usados.has(nome.toLowerCase())) nome = limpo.slice(0, 26) + ' ' + i++;
+  usados.add(nome.toLowerCase());
+  return nome;
 }
 
 /* ================= Excel ================= */
@@ -192,7 +206,10 @@ function gerarXLSXCalculo(c, dataCalc, opcoes = {}) {
   [...notasItens(r), NOTA_METODO, ...notasCalculo(r),
     'Nos itens sem pagamentos e sem capitalização, os valores são calculados por fórmulas a partir do valor originário, do fator de correção e dos juros acumulados. Nos demais (com amortizações, capitalização ou honorários sobre a condenação), os valores vêm do cálculo do programa.']
     .forEach(t => { L.push({ c: [{ v: t, s: 'tq' }], altura: Math.ceil(t.length / 170) * 13 + 2 }); mesclar.push(`A${L.length}:K${L.length}`); });
-  return gerarXLSX([{ nome: 'Cálculo', linhas: L, larguras: LARG, imagem: cab.imagem, mesclar }]);
+  // Uma aba para cada simulação de acordo escolhida, depois da aba do cálculo
+  const usados = new Set(['cálculo']);
+  const abas = (opcoes.acordos || []).map(a => folhaXLSXAcordo(calcularAcordo(c, a), nomeAba('Acordo - ' + (a.nome || fmtData(a.data).replace(/\//g, '-')), usados), dataCalc));
+  return gerarXLSX([{ nome: 'Cálculo', linhas: L, larguras: LARG, imagem: cab.imagem, mesclar }, ...abas]);
 }
 
 const notasItens = r => [...r.itens.filter(it => !it.serie).map(it => `${it.rotulo}: ${descItem(it)}`),
@@ -223,7 +240,7 @@ function cabecalhoXLSX(larguras = []) {
 }
 
 async function exportarCalculo(formato, c, dataCalc, opcoes = {}) {
-  const nome = nomeArquivo('Calculo', nomeCredorCurto(c).slice(0, 30), devedoresCurto(c).slice(0, 40), fmtData(dataCalc).replace(/\//g, '-'));
+  const nome = nomeArquivo(opcoes.acordos?.length ? 'Calculo-e-acordos' : 'Calculo', nomeCredorCurto(c).slice(0, 30), devedoresCurto(c).slice(0, 40), fmtData(dataCalc).replace(/\//g, '-'));
   if (formato === 'xlsx') return salvarPlanilha(gerarXLSXCalculo(c, dataCalc, opcoes), nome + '.xlsx');
   const pdf = gerarPDFCalculo(c, dataCalc, nome, opcoes);
   return formato === 'ver' ? visualizarPDF(pdf) : salvarPDF(pdf);

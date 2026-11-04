@@ -43,7 +43,8 @@ function telaAcordo(calcId, acordoId) {
   garantirIndices().then(() => { if (document.body.contains($('#acResumo'))) recalcular(); });
 
   $('#conteudo').innerHTML = cabecalho(nova ? 'Nova simulação de acordo' : 'Simulação de acordo' + (a.nome ? ': ' + a.nome : ''),
-    `${esc(devedoresCurto(c))} - ${esc(nomeCredor(c))}${c.processo ? ' · ' + esc(c.processo) : ''}`, '', '#/calculo/' + c.id) + `
+    `${esc(devedoresCurto(c))} - ${esc(nomeCredor(c))}${c.processo ? ' · ' + esc(c.processo) : ''}`,
+    `<a class="bt" href="#/calculo/${c.id}">&larr; Voltar à planilha de débito</a>`) + `
   <div class="cartao"><h2>Acordo</h2><div class="grade-form">
     ${campo('Nome da simulação (opcional)', `<input id="acNome" value="${esc(a.nome || '')}" placeholder="Ex.: Proposta do devedor, contraproposta">`, 'w2')}
     ${campo('Data do acordo', `<input type="date" id="acData" value="${esc(a.data)}">`, '', 'O débito é atualizado até esta data.')}
@@ -79,10 +80,13 @@ function telaAcordo(calcId, acordoId) {
     <h3 class="sec">Valor corrigido de uma parcela</h3>
     <div class="acoes-linha"><label class="inline">Parcela nº <input type="number" id="acCorrK" min="1" value="1" style="width:80px"></label>
       <label class="inline">paga em <input type="date" id="acCorrData" value="${hoje()}"></label><span id="acCorrRes" class="dica"></span></div>
-    <div class="acoes-linha" style="margin-top:12px"><button class="bt" id="acVer">Visualizar PDF</button><button class="bt" id="acPdf">Salvar PDF</button><button class="bt" id="acXlsx">Salvar Excel</button></div>
+    <div class="acoes-linha" style="margin-top:12px"><label class="inline"><input type="checkbox" id="acComPlanilha"> Incluir a planilha de débito, atualizada até</label>
+      <input type="date" id="acDataPlanilha" value="${esc(dataPlanilhaLembrada(c.id))}" style="width:auto"></div>
+    <p class="dica">Com a planilha de débito, o PDF sai num arquivo só (planilha primeiro, simulação depois) e o Excel ganha a aba do cálculo. A data vem do campo "Atualizar até" da tela do cálculo.</p>
+    <div class="acoes-linha"><button class="bt" id="acVer">Visualizar PDF</button><button class="bt" id="acPdf">Salvar PDF</button><button class="bt" id="acXlsx">Salvar Excel</button></div>
   </div>
 
-  <div class="barra-salvar"><span id="estadoSalvar"></span>${nova ? '' : '<button class="bt perigo" id="acExcluir">Excluir</button><button class="bt" id="acDuplicar">Duplicar</button>'}<button class="bt primario" id="acSalvar">Salvar simulação</button></div>`;
+  <div class="barra-salvar"><span id="estadoSalvar"></span><a class="bt" href="#/calculo/${c.id}">&larr; Voltar à planilha de débito</a>${nova ? '' : '<button class="bt perigo" id="acExcluir">Excluir</button><button class="bt" id="acDuplicar">Duplicar</button>'}<button class="bt primario" id="acSalvar">Salvar simulação</button></div>`;
 
   let ra = null;
   const alterado = () => { marcarSujo(); recalcular(); };
@@ -155,7 +159,7 @@ function telaAcordo(calcId, acordoId) {
   }
 
   $$('#conteudo input, #conteudo select').forEach(el => {
-    if (el.closest('#acItens') || el.id === 'acCorrK' || el.id === 'acCorrData') return;
+    if (el.closest('#acItens') || el.id === 'acCorrK' || el.id === 'acCorrData' || el.id === 'acComPlanilha' || el.id === 'acDataPlanilha') return;
     el.addEventListener('change', () => { ler(); mostrar(); alterado(); });
   });
   $('#acParcela').addEventListener('change', e => { e.target.value = a.parcelas.valor ? fmtNum(a.parcelas.valor) : ''; });
@@ -168,6 +172,16 @@ function telaAcordo(calcId, acordoId) {
     await garantirIndices();
     ra = calcularAcordo(c, a);
     const nome = nomeArquivo('Acordo', devedoresCurto(c).slice(0, 40), fmtData(a.data).replace(/\//g, '-'));
+    // Com a planilha de débito: um arquivo só, a planilha (na data escolhida) e depois esta simulação
+    if ($('#acComPlanilha').checked) {
+      const dp = $('#acDataPlanilha').value;
+      if (!ehData(dp)) throw new Error('Informe a data da planilha de débito.');
+      lembrarDataPlanilha(c.id, dp);
+      const nomeC = nomeArquivo('Calculo-e-acordo', devedoresCurto(c).slice(0, 40), fmtData(dp).replace(/\//g, '-'));
+      if (formato === 'xlsx') return salvarPlanilha(gerarXLSXCalculo(c, dp, { acordos: [a] }), nomeC + '.xlsx');
+      const pdf = gerarPDFCalculo(c, dp, nomeC, { acordos: [a] });
+      return formato === 'ver' ? visualizarPDF(pdf) : salvarPDF(pdf);
+    }
     if (formato === 'xlsx') return salvarPlanilha(gerarXLSXAcordo(ra), nome + '.xlsx');
     const pdf = gerarPDFAcordo(ra, nome);
     return formato === 'ver' ? visualizarPDF(pdf) : salvarPDF(pdf);
@@ -222,11 +236,23 @@ function itensResumoAcordo(ra) {
 }
 
 /* ================= PDF ================= */
+// Aviso quando o arquivo traz a planilha de débito numa data e a simulação parte do débito em outra
+const avisoDatas = (ra, dataPlanilha) => dataPlanilha && dataPlanilha !== ra.data
+  ? `Atenção: a planilha de débito deste arquivo está atualizada até ${fmtData(dataPlanilha)}; esta simulação parte do débito atualizado até a data do acordo (${fmtData(ra.data)}). Por isso os valores das duas não coincidem.` : '';
+
 function gerarPDFAcordo(ra, nome) {
-  const c = ra.c;
   const P = novoDocumento(true);
   P.cab();
+  escreverPDFAcordo(P, ra);
+  rodapePDF(P);
+  return { doc: P.doc, nome: nome + '.pdf' };
+}
+
+// Conteúdo da simulação num documento já aberto (sozinho ou depois da planilha de débito)
+function escreverPDFAcordo(P, ra, dataPlanilha) {
+  const c = ra.c;
   tituloPDF(P, 'Simulação de acordo', [[(ra.a.nome ? ra.a.nome + ' · ' : '') + 'Data do acordo: ' + fmtData(ra.data) + '.', 9, 'normal', COR_SUAVE]]);
+  if (avisoDatas(ra, dataPlanilha)) { paragrafoPDF(P, avisoDatas(ra, dataPlanilha), 8.5, 'bold', COR_PRI); P.y += 3; }
   blocoInfoPDF(P, nomeCredorCurto(c) + ' x ' + devedoresCurto(c), linhasInfo(c));
   subtituloPDF(P, 'Débito na data do acordo');
   tabelaPDF(P, [{ t: 'Item', w: 120 }, { t: 'Débito atualizado', w: 30, a: 'r' }, { t: 'Desconto', w: 30, a: 'r' }, { t: 'Valor com desconto', w: 30, a: 'r' }], [
@@ -250,15 +276,18 @@ function gerarPDFAcordo(ra, nome) {
   }
   ra.avisos.forEach(t => { paragrafoPDF(P, t, 7.5, 'normal', COR_SUAVE); P.y += 1; });
   paragrafoPDF(P, 'Débito calculado conforme o demonstrativo de débito do mesmo cálculo, na data do acordo. ' + NOTA_METODO, 7.5, 'normal', COR_SUAVE);
-  rodapePDF(P);
-  return { doc: P.doc, nome: nome + '.pdf' };
 }
 
 /* ================= Excel (com fórmulas no parcelamento) ================= */
-function gerarXLSXAcordo(ra) {
+const gerarXLSXAcordo = ra => gerarXLSX([folhaXLSXAcordo(ra, 'Acordo')]);
+
+// Folha da simulação (sozinha ou como aba do Excel da planilha de débito)
+function folhaXLSXAcordo(ra, nomeFolha, dataPlanilha) {
   const c = ra.c;
   const LARG = [40, 16, 16, 16, 16, 16, 16, 16], cab = cabecalhoXLSX(LARG);
-  const L = [...cab.linhas, [{ v: 'Simulação de acordo', s: 'tit' }], ...linhasInfo(c).map(t => [t]), null];
+  const L = [...cab.linhas, [{ v: 'Simulação de acordo' + (ra.a.nome ? ': ' + ra.a.nome : ''), s: 'tit' }], ...linhasInfo(c).map(t => [t]), null];
+  const mesclar = [];
+  if (avisoDatas(ra, dataPlanilha)) { L.push({ c: [{ v: avisoDatas(ra, dataPlanilha), s: 'tq' }], altura: 30 }); mesclar.push(`A${L.length}:H${L.length}`); L.push(null); }
   L.push([{ v: 'Débito na data do acordo', s: 'b' }]);
   L.push({ c: ['Item', 'Débito atualizado', 'Desconto', 'Valor com desconto'].map(v => ({ v, s: 'cab' })), altura: 30 });
   const ini = L.length + 1;
@@ -296,8 +325,29 @@ function gerarXLSXAcordo(ra) {
   const crF = L.length;
   if (crF >= cr0) L.push([{ v: 'Total', s: 'bt' }, { v: '', s: 'bt' }, ...['C', 'D', 'E'].map(col => ({ f: `SUM(${col}${cr0}:${col}${crF})`, s: 'mt' })), { v: '', s: 'bt' }, ...['G', 'H'].map(col => ({ f: `SUM(${col}${cr0}:${col}${crF})`, s: 'mt' }))]);
   L.push(null);
-  const mesclar = [];
   [descParcelamento(ra), ...ra.avisos, 'Alterando a taxa, o número de parcelas ou o vencimento inicial, a parcela, os juros e o cronograma são recalculados (as datas de vencimento e o número de linhas do cronograma não mudam).']
     .forEach(t => { L.push({ c: [{ v: t, s: 'tq' }], altura: Math.ceil(t.length / 150) * 13 + 2 }); mesclar.push(`A${L.length}:H${L.length}`); });
-  return gerarXLSX([{ nome: 'Acordo', linhas: L, larguras: LARG, imagem: cab.imagem, mesclar }]);
+  return { nome: nomeFolha, linhas: L, larguras: LARG, imagem: cab.imagem, mesclar };
+}
+
+/* ================= Data da planilha de débito ("Atualizar até" da tela do cálculo) ================= */
+const lembrarDataPlanilha = (calcId, data) => { try { localStorage.setItem('ccb-data-calc-' + calcId, data); } catch { /* sem armazenamento */ } };
+const dataPlanilhaLembrada = calcId => { try { const d = localStorage.getItem('ccb-data-calc-' + calcId); return ehData(d) ? d : hoje(); } catch { return hoje(); } };
+
+// Simulações salvas a incluir na exportação da planilha de débito: lista com todas marcadas; devolve as escolhidas
+// (ou null se a pessoa cancelar). Sem simulações salvas, devolve [] direto.
+function escolherAcordos(c) {
+  const lista = c.acordos || [];
+  if (!lista.length) return Promise.resolve([]);
+  return new Promise(ok => {
+    abrirModal(`<div class="modal-cab"><h2>Incluir simulações de acordo?</h2><button class="bt-x" data-fechar>&times;</button></div>
+      <p class="dica">As simulações marcadas entram no mesmo arquivo, depois da planilha de débito (no Excel, uma aba para cada). Desmarque as que não quiser.</p>
+      <div class="lista-escolha">${lista.map(a => `<label class="inline"><input type="checkbox" data-acordo-exp="${a.id}" checked> ${esc(a.nome || 'Simulação sem nome')} <span class="dica">(acordo em ${fmtData(a.data)})</span></label>`).join('')}</div>
+      <div class="acoes-linha"><button class="bt primario" id="escOk">Gerar</button><button class="bt" id="escNenhuma">Só a planilha de débito</button><button class="bt" data-fechar>Cancelar</button></div>`, 'modal-medio');
+    let respondido = false;
+    const fim = v => { if (respondido) return; respondido = true; fecharModal(); ok(v); };
+    $('#escOk').addEventListener('click', () => fim(lista.filter(a => $(`[data-acordo-exp="${a.id}"]`).checked)));
+    $('#escNenhuma').addEventListener('click', () => fim([]));
+    $$('#modal [data-fechar]').forEach(b => b.addEventListener('click', () => fim(null)));
+  });
 }

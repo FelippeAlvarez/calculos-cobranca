@@ -1,7 +1,7 @@
 'use strict';
 /* Cálculos de Cobrança — dados, telas e editor dos cálculos */
 
-const VERSAO = '1.6.1';
+const VERSAO = '1.7.0';
 
 /* ================= Dados ================= */
 const D = { config: null, indices: null, credores: {}, calculos: {}, carregadoEm: 0 };
@@ -792,7 +792,7 @@ function telaCalculo(id, params) {
       + (r.r523 ? `<p class="dica">Art. 523: base de ${fmtMoeda(r.r523.baseFinal)} (débito atualizado até a data do cálculo).</p>` : '');
     $('#calcDet').innerHTML = tabelasDetalheHTML(r);
   }
-  $('#calcData').addEventListener('change', recalcular);
+  $('#calcData').addEventListener('change', () => { if (ehData($('#calcData').value)) lembrarDataPlanilha(c.id, $('#calcData').value); recalcular(); });
   recalcular();
 
   // ---- Exportação (usa o que está na tela, mesmo antes de salvar)
@@ -800,8 +800,12 @@ function telaCalculo(id, params) {
     validar();
     const data = $('#calcData').value;
     if (!ehData(data)) throw new Error('Informe a data do cálculo.');
+    lembrarDataPlanilha(c.id, data);
+    // Simulações de acordo salvas: a pessoa escolhe quais entram no mesmo arquivo (todas marcadas)
+    const acordos = await escolherAcordos(c);
+    if (acordos === null) return;
     await garantirIndices();
-    await exportarCalculo(formato, c, data, { ordem: $('#ordemVerbas').value });
+    await exportarCalculo(formato, c, data, { ordem: $('#ordemVerbas').value, acordos });
   });
   $('#expVer').addEventListener('click', () => exportar('ver'));
   $('#expPdf').addEventListener('click', () => exportar('pdf'));

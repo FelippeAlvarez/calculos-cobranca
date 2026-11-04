@@ -103,7 +103,13 @@ const MANUAL = [
       <li><b>Correção das parcelas</b>: as parcelas ficam em valores da data do acordo; o índice escolhido corrige cada uma até o pagamento. Use "Valor corrigido de uma parcela" para saber quanto pagar numa data.</li>
       <li><b>Rateio</b>: o cronograma mostra, em cada parcela e no sinal, quanto é do credor e quanto é de honorários advocatícios, na proporção do débito com desconto.</li>
     </ul>
-    <p>Salve a simulação para guardá-la no cálculo (pode haver várias por débito) e gere o PDF ou o Excel (com fórmulas no parcelamento).</p>`],
+    <p>Salve a simulação para guardá-la no cálculo (pode haver várias por débito) e gere o PDF ou o Excel (com fórmulas no parcelamento). O botão <b>Voltar à planilha de débito</b> (no topo e no rodapé) leva de volta ao cálculo.</p>
+    <p><b>Planilha de débito e simulações no mesmo arquivo:</b></p>
+    <ul>
+      <li>Na simulação, marque <b>Incluir a planilha de débito</b>: o PDF sai num arquivo só (planilha de débito primeiro, simulação depois) e o Excel ganha a aba do cálculo. A data da planilha vem do campo "Atualizar até" da tela do cálculo e pode ser alterada ali ao lado.</li>
+      <li>Na tela do cálculo, ao gerar o PDF ou o Excel, o programa lista as simulações salvas, todas marcadas: desmarque as que não quiser. No PDF, cada simulação começa numa página nova; no Excel, cada uma tem a sua aba.</li>
+      <li>Se a data da planilha for diferente da data do acordo, a simulação traz um aviso: ela parte do débito na data do acordo, por isso os valores não coincidem com os da planilha.</li>
+    </ul>`],
 
   ['planilhas', 'Planilhas em PDF e Excel', `
     <p>No quadro "Cálculo", escolha a data em "Atualizar até". O resumo e o detalhamento de cada item aparecem na tela. Use "Visualizar PDF", "Salvar PDF" ou "Salvar Excel" (não é preciso salvar o cálculo antes).</p>
