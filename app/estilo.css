@@ -458,3 +458,6 @@ a.link-cartao h2 { color: var(--pri); }
 .quadro-serie .tabela-edit input[type=month], .quadro-serie .tabela-edit input[type=date] { min-width: 130px; }
 .lista-escolha { display: flex; flex-direction: column; gap: 8px; margin: 8px 0 12px; }
 .lista-escolha label.inline { white-space: normal; }
+
+/* Link discreto (ex.: compartilhar o programa, na tela Sobre) */
+.link-discreto { background: none; border: 0; padding: 0; font: inherit; color: inherit; text-decoration: underline; cursor: pointer; opacity: .85; }
