@@ -32,6 +32,31 @@ function itensResumo(r) {
   return itens;
 }
 
+// Composição do total (rótulo, valor, cor): soma exatamente o total devido
+const CORES_COMP = { principal: '#1f5245', juros: '#b38b3a', multaC: '#d9b866', custas: '#8c9a95', honorarios: '#4b6fb5', multas: '#b3593a' };
+function composicao(r) {
+  const g = k => r.grupos.find(x => x.grupo === k);
+  const v = (k, campo = 'total') => g(k)?.[campo] || 0;
+  return [
+    ['Principal corrigido', v('rubrica', 'principal'), CORES_COMP.principal],
+    ['Juros', v('rubrica', 'juros'), CORES_COMP.juros],
+    ['Multa contratual', v('rubrica', 'multa'), CORES_COMP.multaC],
+    ['Custas e despesas', v('custas'), CORES_COMP.custas],
+    ['Honorários', r2(v('honorarios') + (r.honContr || 0)), CORES_COMP.honorarios],
+    ['Multas processuais e art. 523', r2(v('multa') + v('art523')), CORES_COMP.multas],
+  ].filter(([, x]) => Math.abs(x) > 0.004);
+}
+
+// Cartões do quadro-resumo do PDF: principal, juros e multa, demais parcelas e o total devido
+function cartoesResumo(r) {
+  if (!(r.total > 0)) return [];
+  const comp = composicao(r), v = rot => comp.find(x => x[0] === rot)?.[1] || 0;
+  const principal = v('Principal corrigido'), juros = r2(v('Juros') + v('Multa contratual'));
+  const demais = r2(r.total - principal - juros);
+  return [['Principal corrigido', principal], ['Juros e multa contratual', juros], ['Custas, honorários e multas', demais], ['Total devido', r.total, true]]
+    .filter(([, x, d]) => d || Math.abs(x) > 0.004);
+}
+
 const taxaTxt = it => it.taxaJuros ? fmtPct(Math.round(it.taxaJuros * 1e6) / 1e4) + '%' : '—';
 const descTitulo = c => c.tipo === 'judicial' ? 'Demonstrativo de débito' : 'Planilha de débito';
 function textoArt523(r) {
@@ -70,7 +95,7 @@ function blocoInfoPDF(P, titulo, linhas) {
   const partes = linhas.flatMap(l => doc.splitTextToSize(l, P.larg - 8));
   const h = 8 + partes.length * 3.9 + 2;
   P.espaco(h + 30);
-  doc.setFillColor(...COR_FUNDO); doc.rect(P.M, P.y, P.larg, h, 'F');
+  doc.setFillColor(...COR_FUNDO); doc.roundedRect(P.M, P.y, P.larg, h, 1.6, 1.6, 'F');
   doc.setFillColor(...COR_PRI); doc.rect(P.M, P.y, 1.2, h, 'F');
   doc.setFont('helvetica', 'bold'); doc.setFontSize(10.5); doc.setTextColor(...COR_PRI);
   doc.text(titulo, P.M + 4, P.y + 5.5);
@@ -89,6 +114,7 @@ function gerarPDFCalculo(c, dataCalc, nome, opcoes = {}) {
   tituloPDF(P, descTitulo(c), c.tipo === 'judicial' ? [['Memória de cálculo (art. 524 do CPC). Valores atualizados até ' + fmtData(dataCalc) + '.', 9, 'normal', COR_SUAVE]]
     : [['Valores atualizados até ' + fmtData(dataCalc) + '.', 9, 'normal', COR_SUAVE]]);
   blocoInfoPDF(P, nomeCredorCurto(c) + ' x ' + devedoresCurto(c), linhasInfo(c));
+  cartoesPDF(P, cartoesResumo(r));
   const pg = r.temPagamento;
   let n = 0;
   for (const g of r.grupos) {

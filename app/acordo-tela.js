@@ -21,7 +21,7 @@ function telaAcordos() {
           return `<tr data-c="${c.id}" data-a="${a.id}"><td>${fmtData(a.data)}</td><td>${esc(devedoresCurto(c))}<div class="dica">${esc(nomeCredor(c))}</div></td><td>${esc(a.nome || '—')}</td>
           <td class="num">${ra ? fmtNum(ra.debito) : '—'}</td><td class="num">${ra ? fmtNum(ra.comDesconto) : '—'}</td>
           <td>${ra ? (ra.sinal ? `Sinal ${fmtMoeda(ra.sinal)} + ` : '') + (ra.n ? `${ra.n} × ${fmtMoeda(ra.parcela)}` : 'à vista') : ''}</td></tr>`; }).join('')}</tbody></table></div>`
-      : '<p class="vazio">Nenhuma simulação salva.</p>'}</div>`;
+      : estadoVazio('acordo', 'Nenhum acordo simulado ainda', 'Escolha o débito acima e use "Simular acordo" para propor desconto, sinal e parcelas. As simulações ficam guardadas junto do cálculo.')}</div>`;
   $('#acNova').addEventListener('click', () => executar(() => {
     const id = $('#acCalc').value;
     if (!id) throw new Error('Escolha o débito (cálculo).');

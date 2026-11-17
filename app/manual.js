@@ -12,6 +12,16 @@ const MANUAL = [
       <li>Escolha a data em "Atualizar até" e gere o <b>PDF</b> ou o <b>Excel</b>.</li>
     </ol>`],
 
+  ['telas', 'Painel, lista de cálculos e aparência', `
+    <ul>
+      <li><b>Painel</b> (tela de entrada): indicadores dos cálculos ativos (quantidade, total atualizado hoje, simulações de acordo e prestações a vencer), os cálculos alterados por último, a composição da carteira (principal, juros, custas, honorários e multas) e os últimos índices do Banco Central.</li>
+      <li><b>Cálculos</b>: a lista, em cartões ou em tabela (botões à direita da busca). Filtre por tipo, situação e credor, ou busque por credor, devedor, CPF/CNPJ e processo. A barra colorida de cada cartão mostra a composição do débito. <b>Ctrl+K</b> (ou a lupa no topo) abre a busca de qualquer tela.</li>
+      <li><b>Tela do cálculo</b>: a barra de etapas no alto leva a cada parte (Dados, Devedores, Verbas, Custas, Honorários e multas, Pagamentos, Resultado, Acordos); o sinal de conferido indica as partes já preenchidas. O total atualizado fica sempre à vista na barra de baixo; clique nele para ir ao resultado.</li>
+      <li><b>Resultado</b>: o total em destaque, por extenso, com os critérios usados, a linha do tempo (início, Lei 14.905, pagamentos e data do cálculo) e o gráfico da composição.</li>
+      <li><b>Tema claro ou escuro</b>: botão de meia-lua no topo. Alterna entre automático (segue o aparelho), claro e escuro; a escolha fica guardada neste navegador.</li>
+      <li><b>No celular</b>: a navegação fica na barra de baixo ("Mais" abre o menu completo) e o botão "+" cria um novo cálculo.</li>
+    </ul>`],
+
   ['dados', 'Onde ficam os dados', `
     <ul>
       <li><b>Dropbox (pela internet)</b>: funciona no computador e no celular. Você conecta a sua conta do Dropbox e escolhe a pasta da base. Para trabalhar em equipe, use uma pasta compartilhada com todos; cada pessoa conecta a própria conta e escolhe a mesma pasta.</li>
@@ -112,8 +122,9 @@ const MANUAL = [
     </ul>`],
 
   ['planilhas', 'Planilhas em PDF e Excel', `
-    <p>No quadro "Cálculo", escolha a data em "Atualizar até". O resumo e o detalhamento de cada item aparecem na tela. Use "Visualizar PDF", "Salvar PDF" ou "Salvar Excel" (não é preciso salvar o cálculo antes).</p>
-    <p>No judicial, o PDF é o demonstrativo de débito com a memória de cálculo do art. 524 do CPC: índices, taxas, termos iniciais e finais, fatores, juros e amortizações de cada item. No Excel, os itens sem pagamentos e sem capitalização têm fórmulas; os demais trazem os valores calculados.</p>`],
+    <p>No quadro "Resultado", escolha a data em "Atualizar até". O resumo e o detalhamento de cada item aparecem na tela. Use "Visualizar PDF", "Salvar PDF" ou "Salvar Excel" (não é preciso salvar o cálculo antes).</p>
+    <p>No judicial, o PDF é o demonstrativo de débito com a memória de cálculo do art. 524 do CPC: índices, taxas, termos iniciais e finais, fatores, juros e amortizações de cada item. No Excel, os itens sem pagamentos e sem capitalização têm fórmulas; os demais trazem os valores calculados.</p>
+    <p>O PDF traz no alto uma faixa com o logotipo e os dados do escritório (preencha em Configurações), o título centralizado, o quadro com as partes e o processo e um quadro-resumo com o principal corrigido, os juros e multa contratual, as demais parcelas (custas, honorários e multas) e o total devido.</p>`],
 
   ['indices', 'Índices', `
     <p>IPCA, IGP-M, INPC, IPCA-E, SELIC e taxa legal são buscados automaticamente no Banco Central. Em Configurações é possível atualizá-los manualmente, informar valores à mão e incluir o valor da UFIR-RJ de cada novo ano (divulgado pela SEFAZ-RJ, normalmente em dezembro).</p>

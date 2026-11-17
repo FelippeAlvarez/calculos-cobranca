@@ -1,7 +1,7 @@
 'use strict';
 /* Cálculos de Cobrança — dados, telas e editor dos cálculos */
 
-const VERSAO = '1.7.0';
+const VERSAO = '1.8.0';
 
 /* ================= Dados ================= */
 const D = { config: null, indices: null, credores: {}, calculos: {}, carregadoEm: 0 };
@@ -142,13 +142,19 @@ function marcarSujo() {
 }
 
 function destacarMenu(rota) {
-  $$('#menu a[data-rota]').forEach(a => a.classList.toggle('ativo', rota.startsWith(a.dataset.rota)));
+  $$('#menu a[data-rota], #navInferior a[data-rota]').forEach(a => a.classList.toggle('ativo', rota.startsWith(a.dataset.rota)));
   document.body.classList.remove('menu-aberto');
+  // Botão flutuante de novo cálculo (celular): no painel e na lista
+  $('#fabNovo').hidden = !['inicio', 'calculos'].includes(rota);
+  $('#btBuscaTopo').hidden = !document.body.classList.contains('conectado');
+  const n = Object.values(D.calculos || {}).filter(c => (c.situacao || 'ativo') === 'ativo').length;
+  $('#contCalculos').textContent = n || '';
 }
 
 async function rotear() {
   const h = location.hash.replace(/^#\/?/, '') || 'inicio';
-  const [rota, arg] = h.split('/');
+  const [rotaQ, arg] = h.split('/');
+  const rota = rotaQ.split('?')[0];
   // Sobre, termos e privacidade abrem também antes de entrar
   if (rota === 'sobre') { destacarMenu(rota); window.scrollTo(0, 0); return telaSobre(arg); }
   if (rota === 'manual') { destacarMenu(rota); window.scrollTo(0, 0); return telaManual(); }
@@ -158,63 +164,172 @@ async function rotear() {
   destacarMenu(rota);
   window.scrollTo(0, 0);
   const tela = {
-    inicio: telaInicio, credores: telaCredores, credor: () => telaCredor(arg?.split('?')[0]),
+    inicio: telaPainel, calculos: () => telaCalculos(params), credores: telaCredores, credor: () => telaCredor(arg?.split('?')[0]),
     calculo: () => telaCalculo(arg?.split('?')[0], params),
     acordos: telaAcordos, acordo: () => telaAcordo(...h.split('?')[0].split('/').slice(1, 3)),
     config: () => Auth.ehAdmin() ? telaConfig() : telaConta(), conta: telaConta,
     usuarios: () => Auth.ehAdmin() ? telaUsuarios() : telaConta(),
-  }[rota] || telaInicio;
+  }[rota] || telaPainel;
   await executar(tela);
 }
 
 const cabecalho = (titulo, sub = '', acoes = '', voltar = '') => `<div class="cab-pagina"><div>${voltar ? `<a class="voltar" href="${voltar}">&larr; Voltar</a>` : ''}<h1>${esc(titulo)}</h1>${sub ? `<div class="sub">${sub}</div>` : ''}</div><div class="acoes">${acoes}</div></div>`;
 const optCredores = sel => Object.values(D.credores).sort((a, b) => comparar(a.nome, b.nome))
   .map(c => `<option value="${c.id}" ${c.id === sel ? 'selected' : ''}>${esc(c.nome)}</option>`).join('');
-const chipTipo = c => c.tipo === 'judicial' ? '<span class="chip pendente">Judicial</span>' : '<span class="chip aberto">Extrajudicial</span>';
+const chipTipo = c => c.tipo === 'judicial' ? '<span class="chip judicial">Judicial</span>' : '<span class="chip extra">Extrajudicial</span>';
 const chipSit = c => (c.situacao || 'ativo') === 'ativo' ? '' : ' <span class="chip neutro">Encerrado</span>';
 const ordemCalculo = (a, b) => comparar(nomeCredor(a), nomeCredor(b)) || comparar(devedoresCurto(a), devedoresCurto(b));
 
-/* ================= Início ================= */
-async function telaInicio() {
-  garantirIndices();
+/* ================= Painel e lista de cálculos ================= */
+// Resultado de cada cálculo na data, calculado uma vez por tela
+function resultadosNaData(lista, data) {
+  const cache = {};
+  return c => {
+    if (!(c.id in cache)) { try { cache[c.id] = calcular(c, data); } catch (e) { console.warn('Cálculo', c.id, e); cache[c.id] = null; } }
+    return cache[c.id];
+  };
+}
+const quando = iso => {
+  if (!iso) return '';
+  const d = new Date(iso), dia = iso.slice(0, 10), h = hoje();
+  const ontem = (() => { const x = new Date(); x.setDate(x.getDate() - 1); return `${x.getFullYear()}-${p2(x.getMonth() + 1)}-${p2(x.getDate())}`; })();
+  const local = `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
+  return local === h ? `hoje, ${p2(d.getHours())}:${p2(d.getMinutes())}` : local === ontem ? 'ontem' : fmtData(dia);
+};
+const avatar = (nome, cls = '') => `<span class="avatar-ini ${cls}" style="background:${corDe(nome)}">${esc(iniciais(nome))}</span>`;
+const barraComp = (comp, cls = '') => {
+  const t = comp.reduce((s, [, v]) => s + Math.max(0, v), 0);
+  return t > 0 ? `<div class="barra-comp ${cls}">${comp.filter(([, v]) => v > 0).map(([rot, v, cor]) => `<i style="flex:${v / t};background:${cor}" title="${esc(rot)}: ${fmtMoeda(v)}"></i>`).join('')}</div>` : '';
+};
+const estadoVazio = (ic, titulo, texto, botao = '') => `<div class="estado-vazio"><div class="ev-ilustra">${icone(ic)}<span>${icone('mais')}</span></div>
+  <h3>${titulo}</h3><p>${texto}</p>${botao}</div>`;
+function saudacao() {
+  const h = new Date().getHours(), nome = (usuarioLocal() || '').split(/\s+/)[0];
+  return (h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite') + (nome ? ', ' + nome : '');
+}
+// Índices do Banco Central no último mês disponível
+function ultimosIndices() {
+  const out = [];
+  const s = n => D.indices?.series?.[n] || {};
+  const ult = n => Object.keys(s(n)).sort().pop();
+  const mesCurto = ym => ym ? ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'][+ym.slice(5) - 1] + '/' + ym.slice(2, 4) : '';
+  const ipca = ult('IPCA');
+  if (ipca) {
+    let ac = 1; for (let i = 0; i < 12; i++) { const v = s('IPCA')[addMes(ipca, -i)]; if (v === undefined) { ac = null; break; } ac *= 1 + v / 100; }
+    out.push(['IPCA · ' + mesCurto(ipca), fmtPct(s('IPCA')[ipca]) + '%', ac ? '12 meses: ' + fmtNum((ac - 1) * 100) + '%' : '']);
+  }
+  const se = ult('SELIC'); if (se) out.push(['SELIC · ' + mesCurto(se), fmtPct(s('SELIC')[se]) + '%', 'no mês']);
+  const tl = ult('Taxa legal'); if (tl) out.push(['Taxa legal · ' + mesCurto(tl), fmtPct(s('Taxa legal')[tl]) + '%', 'ao mês (Lei 14.905)']);
+  return out;
+}
+// Mostra o progresso enquanto os índices são buscados no Banco Central e redesenha a tela ao terminar
+function indicesEmSegundoPlano(aoTerminar) {
+  const p = garantirIndices();
+  if (!atualizandoIndices) return;
+  const hash = location.hash;
+  aviso('Atualizando os índices do Banco Central…', 'carregando', { fixo: true });
+  p.then(() => { fecharAviso('carregando'); if (location.hash === hash && !sujo && $('#modal').hidden) aoTerminar(); });
+}
+
+function telaPainel() {
+  indicesEmSegundoPlano(telaPainel);
   const data = hoje();
-  const lista = Object.values(D.calculos).sort(ordemCalculo);
-  const st = { busca: localStorage.getItem('ccb-busca') || '', cred: '', tipo: 'todos', sit: 'ativo' };
-  const tot = {};
-  const totalDe = c => (tot[c.id] = tot[c.id] ?? calcular(c, data).total);
-  const filtrar = () => lista.filter(c => (!st.cred || credoresDoCalculo(c).includes(st.cred)) && (st.tipo === 'todos' || c.tipo === st.tipo)
-    && (st.sit === 'todos' || (c.situacao || 'ativo') === st.sit)
-    && (!st.busca || normalizar([nomeCredor(c), c.titulo, devedoresCurto(c), c.processo, ...(c.devedores || []).map(d => soDigitos(d.documento))].join(' ')).includes(normalizar(st.busca))));
+  const lista = Object.values(D.calculos);
+  const res = resultadosNaData(lista, data);
   const ativos = lista.filter(c => (c.situacao || 'ativo') === 'ativo');
-  const kpi = (r, v, s = '') => `<div class="kpi"><span>${r}</span><b>${v}</b>${s ? `<small>${s}</small>` : ''}</div>`;
-  $('#conteudo').innerHTML = cabecalho('Cálculos', `Valores atualizados até hoje (${fmtData(data)}) com os critérios de cada cálculo.`,
-    `<a class="bt primario" href="#/calculo/novo">Novo cálculo</a>`) +
+  const total = ativos.reduce((s, c) => s + cent(res(c)?.total), 0) / 100;
+  const acordos = ativos.reduce((s, c) => s + (c.acordos || []).length, 0);
+  const aVencer = ativos.reduce((s, c) => s + (res(c)?.aVencer || 0), 0);
+  // Composição somada da carteira (cálculos ativos)
+  const comp = {};
+  ativos.forEach(c => { const r = res(c); if (r) composicao(r).forEach(([rot, v, cor]) => { comp[rot] = comp[rot] || [rot, 0, cor]; comp[rot][1] += v; }); });
+  const compL = Object.values(comp).filter(([, v]) => v > 0.004);
+  const maxComp = Math.max(...compL.map(([, v]) => v), 1);
+  const recentes = [...lista].sort((a, b) => comparar(b.alteradoEm, a.alteradoEm)).slice(0, 6);
+  const kpi = (ic, cor, r, v, s = '') => `<div class="kpi kpi-${cor}"><span class="kpi-ic">${icone(ic)}</span><span>${r}</span><b>${v}</b>${s ? `<small>${s}</small>` : ''}</div>`;
+  const dataLonga = new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const indices = ultimosIndices();
+  $('#conteudo').innerHTML = `<div class="cab-pagina"><div><div class="sub sobre-titulo">${esc(dataLonga.charAt(0).toUpperCase() + dataLonga.slice(1))}</div><h1>${esc(saudacao())}</h1>
+      <div class="sub">Valores atualizados até hoje pelos critérios de cada cálculo.</div></div>
+      <div class="acoes"><a class="bt" href="#/calculos">${icone('lista')}Ver cálculos</a><a class="bt primario" href="#/calculo/novo">${icone('mais')}Novo cálculo</a></div></div>` +
     (Armaz.conflitos.length ? `<p class="alerta">O Dropbox criou cópias com conflito (duas pessoas alteraram o mesmo arquivo ao mesmo tempo). Elas não são lidas pelo programa. Confira e apague na pasta dos dados: ${Armaz.conflitos.map(esc).join(', ')}</p>` : '') +
     (!Object.keys(D.credores).length ? `<div class="cartao destaque"><h2>Primeiros passos</h2><ol>
       <li>Preencha os dados do escritório e os critérios padrão em <a href="#/config">Configurações</a>.</li>
       <li>Cadastre o credor (cliente) em <a href="#/credor/novo">Credores</a>.</li>
       <li>Crie o cálculo e lance as rubricas, custas, honorários, multas e amortizações.</li></ol></div>` : '') +
-    `<div class="kpis">${kpi('Cálculos ativos', ativos.length, `${ativos.filter(c => c.tipo === 'judicial').length} judiciais · ${ativos.filter(c => c.tipo !== 'judicial').length} extrajudiciais`)}
-      ${kpi('Total atualizado (ativos)', fmtMoeda(ativos.reduce((s, c) => s + cent(totalDe(c)), 0) / 100))}${kpi('Credores', Object.keys(D.credores).length)}</div>
-    <div class="cartao"><div class="barra-filtros">
-      <input type="search" id="fBusca" placeholder="Buscar credor, devedor, CPF, processo…" value="${esc(st.busca)}">
-      <select id="fCred"><option value="">Todos os credores</option>${optCredores(st.cred)}</select>
-      <select id="fTipo"><option value="todos">Judiciais e extrajudiciais</option><option value="judicial">Judiciais</option><option value="extrajudicial">Extrajudiciais</option></select>
+    `<div class="kpis kpis-painel">
+      ${kpi('calc', 'verde', 'Cálculos ativos', ativos.length, [ativos.filter(c => c.tipo === "judicial").length, ativos.filter(c => c.tipo !== "judicial").length].map((n, i) => n + (i ? (n === 1 ? " extrajudicial" : " extrajudiciais") : (n === 1 ? " judicial" : " judiciais"))).join(" · "))}
+      ${kpi('moeda', 'ouro', 'Total atualizado', fmtMoeda(total), 'cálculos ativos, em ' + fmtData(data))}
+      ${kpi('acordo', 'azul', 'Simulações de acordo', acordos, acordos ? `em ${ativos.filter(c => (c.acordos || []).length).length} cálculo(s)` : 'nenhuma ainda')}
+      ${aVencer ? kpi('relogio', 'vinho', 'Prestações a vencer', aVencer, 'nas séries mensais') : kpi('pessoas', 'vinho', 'Credores', Object.keys(D.credores).length, 'cadastrados')}
+    </div>
+    <div class="painel-duas">
+      <div class="cartao"><div class="cartao-cab"><h2>Alterados recentemente</h2><a class="bt-link" href="#/calculos">Ver todos ›</a></div>
+        ${recentes.length ? `<div class="lista-recentes">${recentes.map(c => `<a class="recente" href="#/calculo/${c.id}">${avatar(devedoresCurto(c))}
+          <span class="rc-txt"><b>${esc(devedoresCurto(c))}</b><small>${chipTipo(c)}${chipSit(c)} ${esc(c.processo || c.titulo || nomeCredor(c))}</small></span>
+          <span class="rc-val"><b>${res(c) ? fmtMoeda(res(c).total) : '—'}</b><small>${esc(quando(c.alteradoEm))}</small></span></a>`).join('')}</div>`
+          : estadoVazio('calc', 'Nenhum cálculo ainda', 'Crie o primeiro cálculo com as verbas, custas, honorários e pagamentos.', '<a class="bt primario" href="#/calculo/novo">Novo cálculo</a>')}</div>
+      <div class="cartao"><div class="cartao-cab"><h2>Composição da carteira</h2><span class="chip neutro">${ativos.length} ativo(s)</span></div>
+        ${compL.length ? `<div class="barras-comp">${compL.map(([rot, v, cor]) => `<div class="bc-linha"><span>${esc(rot)}</span><div class="bc-trilho"><i style="width:${Math.max(1.5, v / maxComp * 100)}%;background:${cor}"></i></div><b>${fmtMoeda(v)}</b></div>`).join('')}</div>`
+          : '<p class="vazio">Sem valores para mostrar.</p>'}
+        ${indices.length ? `<div class="indices-painel">${indices.map(([r, v, s]) => `<div><span>${esc(r)}</span><b>${esc(v)}</b><small>${esc(s)}</small></div>`).join('')}</div>` : ''}</div>
+    </div>`;
+}
+
+async function telaCalculos(params = new URLSearchParams()) {
+  indicesEmSegundoPlano(() => telaCalculos());
+  const data = hoje();
+  const lista = Object.values(D.calculos).sort(ordemCalculo);
+  const res = resultadosNaData(lista, data);
+  const lerLS = (k, p) => { try { return localStorage.getItem(k) || p; } catch { return p; } };
+  const st = { busca: lerLS('ccb-busca', ''), cred: '', tipo: 'todos', sit: 'ativo', vista: lerLS('ccb-vista', 'cartoes') };
+  const filtrar = () => lista.filter(c => (!st.cred || credoresDoCalculo(c).includes(st.cred)) && (st.tipo === 'todos' || c.tipo === st.tipo)
+    && (st.sit === 'todos' || (c.situacao || 'ativo') === st.sit)
+    && (!st.busca || normalizar([nomeCredor(c), c.titulo, devedoresCurto(c), c.processo, ...(c.devedores || []).map(d => soDigitos(d.documento))].join(' ')).includes(normalizar(st.busca))));
+  const ativos = lista.filter(c => (c.situacao || 'ativo') === 'ativo');
+  const contar = (tipo, sit = st.sit) => lista.filter(c => (tipo === 'todos' || c.tipo === tipo) && (sit === 'todos' || (c.situacao || 'ativo') === sit)).length;
+  $('#conteudo').innerHTML = cabecalho('Cálculos', `${ativos.length} ativo(s) · total atualizado de ${fmtMoeda(ativos.reduce((s, c) => s + cent(res(c)?.total), 0) / 100)} em ${fmtData(data)}`,
+    `<a class="bt primario" href="#/calculo/novo">${icone('mais')}Novo cálculo</a>`) +
+    `<div class="barra-filtros">
+      <div class="chips-filtro" id="fTipo"></div>
       <select id="fSit"><option value="ativo">Ativos</option><option value="encerrado">Encerrados</option><option value="todos">Todos</option></select>
-    </div><div id="lista"></div></div>`;
+      <select id="fCred"><option value="">Todos os credores</option>${optCredores(st.cred)}</select>
+      <label class="busca-campo">${icone('busca')}<input type="search" id="fBusca" placeholder="Buscar credor, devedor, CPF, processo…" value="${esc(st.busca)}"></label>
+      <div class="alternar-vista" role="group" aria-label="Modo de exibição"><button type="button" data-vista="cartoes" title="Cartões">${icone('grade')}</button><button type="button" data-vista="tabela" title="Tabela">${icone('lista')}</button></div>
+    </div><div id="lista"></div>`;
+  const desenharChips = () => {
+    $('#fTipo').innerHTML = [['todos', 'Todos'], ['judicial', 'Judiciais'], ['extrajudicial', 'Extrajudiciais']]
+      .map(([v, r]) => `<button type="button" class="chip-filtro ${st.tipo === v ? 'on' : ''}" data-tipo="${v}">${r} <span>${contar(v)}</span></button>`).join('');
+    $$('#fTipo [data-tipo]').forEach(b => b.addEventListener('click', () => { st.tipo = b.dataset.tipo; desenharChips(); desenhar(); }));
+    $$('[data-vista]').forEach(b => b.classList.toggle('on', b.dataset.vista === st.vista));
+  };
   const desenhar = () => {
     const l = filtrar();
-    $('#lista').innerHTML = l.length ? `<div class="rolagem"><table class="tabela clicavel"><thead><tr><th>Credor</th><th>Devedor(es)</th><th>Cálculo</th><th class="num">Total atualizado</th></tr></thead><tbody>
-      ${l.map(c => `<tr data-id="${c.id}"><td>${esc(nomeCredor(c))}</td><td>${esc(devedoresCurto(c))}${c.titulo ? `<div class="dica">${esc(c.titulo)}</div>` : ''}</td>
-        <td>${chipTipo(c)}${chipSit(c)}${c.processo ? `<div class="dica">${esc(c.processo)}</div>` : ''}</td><td class="num">${fmtNum(totalDe(c))}</td></tr>`).join('')}</tbody></table></div>`
-      : '<p class="vazio">Nenhum cálculo encontrado.</p>';
-    $$('#lista tr[data-id]').forEach(tr => tr.addEventListener('click', () => { location.hash = '#/calculo/' + tr.dataset.id; }));
+    if (!l.length) {
+      $('#lista').innerHTML = lista.length ? estadoVazio('busca', 'Nenhum cálculo encontrado', 'Nenhum cálculo corresponde aos filtros. Mude a busca ou os filtros acima.')
+        : estadoVazio('calc', 'Nenhum cálculo ainda', 'Crie o primeiro cálculo: verbas com os próprios critérios, custas, honorários, multas e pagamentos parciais.', '<a class="bt primario" href="#/calculo/novo">Novo cálculo</a>');
+      return;
+    }
+    if (st.vista === 'tabela') {
+      $('#lista').innerHTML = `<div class="cartao"><div class="rolagem"><table class="tabela clicavel"><thead><tr><th>Credor</th><th>Devedor(es)</th><th>Cálculo</th><th class="num">Total atualizado</th></tr></thead><tbody>
+        ${l.map(c => `<tr data-id="${c.id}"><td>${esc(nomeCredor(c))}</td><td>${esc(devedoresCurto(c))}${c.titulo ? `<div class="dica">${esc(c.titulo)}</div>` : ''}</td>
+          <td>${chipTipo(c)}${chipSit(c)}${c.processo ? `<div class="dica">${esc(c.processo)}</div>` : ''}</td><td class="num">${res(c) ? fmtNum(res(c).total) : '—'}</td></tr>`).join('')}</tbody></table></div></div>`;
+      $$('#lista tr[data-id]').forEach(tr => tr.addEventListener('click', () => { location.hash = '#/calculo/' + tr.dataset.id; }));
+      return;
+    }
+    $('#lista').innerHTML = `<div class="grade-cartoes">${l.map(c => { const r = res(c); return `<a class="cartao-calc" href="#/calculo/${c.id}">
+      <div class="cc-topo">${avatar(devedoresCurto(c))}<span class="cc-nome"><b>${esc(devedoresCurto(c))}</b><small>${esc(nomeCredor(c))}</small></span><span class="cc-chips">${chipTipo(c)}${chipSit(c)}</span></div>
+      <div><small class="dica">Total em ${fmtData(data)}</small><div class="cc-valor">${r ? fmtMoeda(r.total) : '—'}</div></div>
+      ${r ? barraComp(composicao(r)) : ''}
+      <div class="cc-pe"><span>${esc(c.processo || c.titulo || (c.tipo === 'judicial' ? 'Sem número de processo' : 'Cobrança extrajudicial'))}</span><span>${esc(quando(c.alteradoEm))}</span></div></a>`; }).join('')}</div>`;
   };
-  $('#fBusca').addEventListener('input', e => { st.busca = e.target.value; localStorage.setItem('ccb-busca', st.busca); desenhar(); });
+  $('#fBusca').addEventListener('input', e => { st.busca = e.target.value; try { localStorage.setItem('ccb-busca', st.busca); } catch { /* ok */ } desenhar(); });
   $('#fCred').addEventListener('change', e => { st.cred = e.target.value; desenhar(); });
-  $('#fTipo').addEventListener('change', e => { st.tipo = e.target.value; desenhar(); });
-  $('#fSit').addEventListener('change', e => { st.sit = e.target.value; desenhar(); });
+  $('#fSit').addEventListener('change', e => { st.sit = e.target.value; desenharChips(); desenhar(); });
+  $$('[data-vista]').forEach(b => b.addEventListener('click', () => { st.vista = b.dataset.vista; try { localStorage.setItem('ccb-vista', st.vista); } catch { /* ok */ } desenharChips(); desenhar(); }));
+  desenharChips();
   desenhar();
+  if (params.get('busca')) $('#fBusca').focus();
 }
 
 /* ================= Critérios de correção e juros (uma linha por verba) ================= */
@@ -270,7 +385,7 @@ function telaCredores() {
   $('#conteudo').innerHTML = cabecalho('Credores (clientes)', '', '<a class="bt primario" href="#/credor/novo">Novo credor</a>') +
     `<div class="cartao">${lista.length ? `<div class="rolagem"><table class="tabela clicavel"><thead><tr><th>Nome</th><th>CPF/CNPJ</th><th>Endereço</th><th class="num">Cálculos ativos</th></tr></thead><tbody>
       ${lista.map(c => `<tr data-id="${c.id}"><td>${esc(c.nome)}</td><td>${esc(fmtDoc(c.documento))}</td><td>${esc(c.endereco)}</td><td class="num">${qtd(c.id)}</td></tr>`).join('')}</tbody></table></div>`
-      : '<p class="vazio">Nenhum credor cadastrado.</p>'}</div>`;
+      : estadoVazio('pessoas', 'Nenhum credor cadastrado', 'Cadastre o credor (cliente) com os critérios padrão de correção e juros, que serão sugeridos nos cálculos dele.', '<a class="bt primario" href="#/credor/novo">Novo credor</a>')}</div>`;
   $$('tr[data-id]').forEach(tr => tr.addEventListener('click', () => { location.hash = '#/credor/' + tr.dataset.id; }));
 }
 
@@ -329,6 +444,7 @@ function telaCredor(id) {
 }
 
 /* ================= Cálculo ================= */
+const h2Sec = (ic, t) => `<h2 class="h2-sec"><span class="sec-ic">${icone(ic)}</span><span>${t}</span></h2>`;
 const campo = (rot, html, cls = '', dica = '') => `<div class="campo ${cls}"><label>${rot}</label>${html}${dica ? `<small>${dica}</small>` : ''}</div>`;
 const inpData = (k, v) => `<input type="date" data-f="${k}" value="${esc(v || '')}">`;
 const inpValor = (k, v) => `<input data-f="${k}" inputmode="decimal" class="num" value="${v ? esc(fmtNum(v)) : ''}">`;
@@ -388,7 +504,7 @@ function telaCalculo(id, params) {
   const original = novo ? null : D.calculos[id];
   if (!novo && !original) throw new Error('Cálculo não encontrado.');
   if (!Object.keys(D.credores).length) {
-    $('#conteudo').innerHTML = cabecalho('Novo cálculo', '', '', '#/inicio') + '<div class="cartao"><p>Cadastre antes o credor (cliente).</p><a class="bt primario" href="#/credor/novo">Novo credor</a></div>';
+    $('#conteudo').innerHTML = cabecalho('Novo cálculo', '', '', '#/calculos') + '<div class="cartao"><p>Cadastre antes o credor (cliente).</p><a class="bt primario" href="#/credor/novo">Novo credor</a></div>';
     return;
   }
   const c = novo ? novoCalculo(params.get('credor') || '') : structuredClone(original);
@@ -403,8 +519,9 @@ function telaCalculo(id, params) {
   const critNovo = lista => ({ ...(lista[lista.length - 1]?.crit || critCredor(c.credorId)) });
 
   $('#conteudo').innerHTML = cabecalho(novo ? 'Novo cálculo' : `${devedoresCurto(c)} - ${nomeCredor(c)}`,
-    novo ? '' : `${chipTipo(c)}${chipSit(c)} <span class="dica">${c.alteradoPor ? 'Alterado por ' + esc(c.alteradoPor) + ' em ' : 'Alterado em '}${new Date(c.alteradoEm).toLocaleString('pt-BR')}</span>`, '', '#/inicio') + `
-  <div class="cartao"><h2>Dados do cálculo</h2>
+    novo ? '' : `${chipTipo(c)}${chipSit(c)} <span class="dica">${c.alteradoPor ? 'Alterado por ' + esc(c.alteradoPor) + ' em ' : 'Alterado em '}${new Date(c.alteradoEm).toLocaleString('pt-BR')}</span>`, '', '#/calculos') + `
+  <nav class="etapas" id="etapas" aria-label="Etapas do cálculo"></nav>
+  <div class="cartao secao" id="secDados" data-etapa="Dados">${h2Sec('doc', 'Dados do cálculo')}
     <div class="grade-form" id="dados">
       <div class="campo wfull"><label>Credor(es) *</label><div id="credoresCalc"></div>
         <div><button type="button" class="bt pequeno" id="btAddCred">+ Adicionar credor</button></div>
@@ -421,29 +538,29 @@ function telaCalculo(id, params) {
       ${campo('Observações internas (não saem na planilha)', `<textarea data-c="obs" rows="2">${esc(c.obs)}</textarea>`, 'wfull')}
     </div></div>
 
-  <div class="cartao"><div class="cartao-cab"><h2>Devedores</h2><button class="bt pequeno" id="btAddDev">+ Adicionar devedor</button></div><div id="devedores"></div></div>
+  <div class="cartao secao" id="secDev" data-etapa="Devedores"><div class="cartao-cab">${h2Sec('usuario', 'Devedores')}<button class="bt pequeno" id="btAddDev">+ Adicionar devedor</button></div><div id="devedores"></div></div>
 
-  <div class="cartao"><div class="cartao-cab"><h2>Verbas (condenação / débito)</h2><div class="acoes"><button class="bt pequeno" id="btAddRub">+ Adicionar verba</button><button class="bt pequeno" id="btSeq">Lançar meses em sequência</button><button class="bt pequeno" id="btImpSeries">Importar planilha</button></div></div>
+  <div class="cartao secao" id="secVerbas" data-etapa="Verbas"><div class="cartao-cab">${h2Sec('moeda', 'Verbas (condenação / débito)')}<div class="acoes"><button class="bt pequeno" id="btAddRub">+ Adicionar verba</button><button class="bt pequeno" id="btSeq">Lançar meses em sequência</button><button class="bt pequeno" id="btImpSeries">Importar planilha</button></div></div>
     <p class="dica">Uma linha por verba, com os próprios termos iniciais e critérios. Ex.: danos morais com correção desde o arbitramento (Súmula 362 do STJ) e juros desde o evento danoso (Súmula 54 do STJ); danos materiais com correção desde o efetivo prejuízo (Súmula 43 do STJ). Juros desde em branco: sem juros.
       <b>Lei 14.905</b>: a partir de 30/08/2024, correção pelo IPCA e juros pela taxa legal. <a href="#" id="sugVerbas">Editar as sugestões de descrição</a></p>
     <div class="rolagem"><table class="tabela tabela-edit tabela-verbas"><thead><tr><th>Verba</th><th class="num">Valor (R$)</th><th>Correção desde</th><th>Juros desde</th>${CAB_CRIT}<th class="num">Multa %</th><th></th></tr></thead><tbody id="rubricas"></tbody></table></div>
     <div id="series"></div>
     <p class="dica">Prestações mensais (aluguel, cota condominial, IPTU, alimentos, honorários de partido…): use "Lançar meses em sequência" ou "Importar planilha". Cada rubrica forma uma série, e o mesmo mês pode ter várias séries.</p></div>
 
-  <div class="cartao"><div class="cartao-cab"><h2>Custas e despesas</h2><button class="bt pequeno" id="btAddCus">+ Adicionar</button></div>
+  <div class="cartao secao" id="secCustas" data-etapa="Custas"><div class="cartao-cab">${h2Sec('martelo', 'Custas e despesas')}<button class="bt pequeno" id="btAddCus">+ Adicionar</button></div>
     <p class="dica">Uma linha por despesa: correção em geral desde o desembolso; juros só se indicar o termo inicial. Para não corrigir, escolha o índice "Nenhum".
       "Id. no processo" (opcional) indica onde está o comprovante nos autos e sai na planilha. <a href="#" id="sugCustas">Editar as sugestões de descrição</a></p>
     <div class="rolagem"><table class="tabela tabela-edit tabela-verbas"><thead><tr><th>Descrição</th><th class="num">Valor (R$)</th><th>Correção desde</th><th>Juros desde</th>${CAB_CRIT}<th>Id. no processo</th><th></th></tr></thead><tbody id="custas"></tbody></table></div></div>
 
-  <div class="cartao so-judicial"><div class="cartao-cab"><h2>Honorários advocatícios sucumbenciais</h2><button class="bt pequeno" id="btAddHon">+ Adicionar</button></div>
+  <div class="cartao secao so-judicial" id="secHon" data-etapa="Honorários e multas"><div class="cartao-cab">${h2Sec('balanca', 'Honorários advocatícios sucumbenciais')}<button class="bt pequeno" id="btAddHon">+ Adicionar</button></div>
     <p class="dica">Sobre a condenação: marque as verbas da base (os honorários acompanham a correção e os juros de cada uma) e, se houver, inclua outras bases, como o valor líquido de uma obrigação de fazer. Valor fixo ou sobre o valor da causa: juros desde o trânsito em julgado (art. 85, § 16, do CPC).</p>
     <div id="honorarios"></div></div>
 
-  <div class="cartao so-judicial"><div class="cartao-cab"><h2>Multas processuais</h2><button class="bt pequeno" id="btAddMul">+ Adicionar</button></div>
+  <div class="cartao secao so-judicial" id="secMultas"><div class="cartao-cab">${h2Sec('alerta', 'Multas processuais')}<button class="bt pequeno" id="btAddMul">+ Adicionar</button></div>
     <p class="dica">Litigância de má-fé, embargos protelatórios, agravo interno, ato atentatório e astreintes: valor fixo, percentual do valor corrigido da causa ou multa diária.</p>
     <div id="multas"></div></div>
 
-  <div class="cartao so-judicial" id="sec523"><h2>Multa e honorários do art. 523, § 1º, do CPC</h2>
+  <div class="cartao secao so-judicial" id="sec523">${h2Sec('pct', 'Multa e honorários do art. 523, § 1º, do CPC')}
     <label class="inline"><input type="checkbox" data-a="aplicar" ${c.art523.aplicar ? 'checked' : ''}> Incluir (débito não pago no prazo de 15 dias do cumprimento de sentença)</label>
     <div class="grade-form a523" style="margin-top:8px">
       <div class="campo"><label class="inline"><input type="checkbox" data-a="incluirMulta" ${c.art523.incluirMulta !== false ? 'checked' : ''}> Multa (%)</label>
@@ -457,28 +574,29 @@ function telaCalculo(id, params) {
     </div>
     <p class="dica a523">Calculados sobre o débito atualizado até a data do cálculo. Pagamento parcial feito no prazo: marque "No prazo do art. 523" na amortização, para reduzir a base (§ 2º). Desmarque a multa ou os honorários para incluir só um deles.</p></div>
 
-  <div class="cartao so-extra"><h2>Honorários contratuais</h2>
+  <div class="cartao secao so-extra" id="secContr" data-etapa="Honorários">${h2Sec('balanca', 'Honorários contratuais')}
     <div class="grade-form">${campo('Percentual sobre o débito atualizado (%)', `<input id="honContr" inputmode="decimal" value="${vazio(c.honContr) ? '' : esc(fmtPct(c.honContr))}">`)}</div></div>
 
-  <div class="cartao"><div class="cartao-cab"><h2>Amortizações (pagamentos parciais)</h2><button class="bt pequeno" id="btAddAmo">+ Adicionar pagamento</button></div>
+  <div class="cartao secao" id="secAmort" data-etapa="Pagamentos"><div class="cartao-cab">${h2Sec('cartao', 'Amortizações (pagamentos parciais)')}<button class="bt pequeno" id="btAddAmo">+ Adicionar pagamento</button></div>
     <p class="dica">O débito é atualizado até a data de cada pagamento e o valor é abatido conforme a imputação escolhida. "Juros primeiro" segue o art. 354 do CC (juros e multa vencidos, depois o principal).
       Em "Abater de", escolha onde o pagamento recai: por exemplo, "Custas e despesas primeiro; depois as demais verbas". Se o item ou grupo escolhido for quitado, o que sobrar vai para os demais itens, dos mais antigos para os mais novos.</p>
     <div class="rolagem"><table class="tabela tabela-edit"><thead><tr><th>Data</th><th class="num">Valor pago</th><th>Imputação</th><th>Abater de</th><th class="cen col-prazo">No prazo do art. 523</th><th>Descrição</th><th></th></tr></thead><tbody id="amortizacoes"></tbody></table></div></div>
 
-  <div class="cartao destaque"><div class="cartao-cab"><h2>Cálculo</h2><label class="inline">Atualizar até <input type="date" id="calcData" value="${hoje()}"></label></div>
+  <div class="cartao secao destaque" id="secResultado" data-etapa="Resultado"><div class="cartao-cab">${h2Sec('calc', 'Resultado')}<label class="inline">Atualizar até <input type="date" id="calcData" value="${hoje()}"></label></div>
+    <div id="calcVisual"></div>
     <div class="colunas2"><div id="calcResumo" class="resumo"></div><div id="calcAvisos"></div></div>
     <details class="detalhes"><summary>Ver o cálculo de cada item</summary><div id="calcDet"></div></details>
-    <div class="acoes-linha"><label class="inline ordem-verbas">Prestações mensais <select id="ordemVerbas" style="width:auto"><option value="mes">por mês</option><option value="rubrica">por rubrica</option></select></label><button class="bt" id="expVer">Visualizar PDF</button><button class="bt" id="expPdf">Salvar PDF</button><button class="bt" id="expXlsx">Salvar Excel</button></div>
+    <div class="acoes-linha"><label class="inline ordem-verbas">Prestações mensais <select id="ordemVerbas" style="width:auto"><option value="mes">por mês</option><option value="rubrica">por rubrica</option></select></label><button class="bt" id="expVer">${icone('doc')}Visualizar PDF</button><button class="bt primario" id="expPdf">${icone('baixar')}Salvar PDF</button><button class="bt" id="expXlsx">${icone('tabela')}Salvar Excel</button></div>
   </div>
 
-  <div class="cartao"><div class="cartao-cab"><h2>Simulações de acordo</h2><button class="bt pequeno" id="btAcordo">Simular acordo</button></div>
+  <div class="cartao secao" id="secAcordos" data-etapa="Acordos"><div class="cartao-cab">${h2Sec('acordo', 'Simulações de acordo')}<button class="bt pequeno" id="btAcordo">Simular acordo</button></div>
     ${(original?.acordos || []).length ? `<div class="rolagem"><table class="tabela clicavel"><thead><tr><th>Data</th><th>Simulação</th><th class="num">Com desconto</th><th>Parcelamento</th></tr></thead><tbody>
       ${original.acordos.map(a => { let ra = null; try { ra = calcularAcordo(original, a); } catch { /* cálculo incompleto */ }
         return `<tr data-acordo="${a.id}"><td>${fmtData(a.data)}</td><td>${esc(a.nome || '—')}</td><td class="num">${ra ? fmtNum(ra.comDesconto) : '—'}</td>
           <td>${ra ? (ra.sinal ? `Sinal ${fmtMoeda(ra.sinal)} + ` : '') + (ra.n ? `${ra.n} × ${fmtMoeda(ra.parcela)}` : 'à vista') : ''}</td></tr>`; }).join('')}</tbody></table></div>`
-      : '<p class="vazio">Nenhuma simulação. Use "Simular acordo" para calcular desconto, sinal e parcelamento sobre este débito.</p>'}</div>
+      : estadoVazio('acordo', 'Nenhuma simulação de acordo', 'Use "Simular acordo" para calcular desconto, sinal e parcelamento sobre este débito. As simulações ficam guardadas junto do cálculo.')}</div>
 
-  <div class="barra-salvar"><span id="estadoSalvar"></span>${novo ? '' : (Auth.ehAdmin() ? '<button class="bt perigo" id="btExcluir">Excluir</button>' : '') + '<button class="bt" id="btDuplicar">Duplicar</button>'}<button class="bt primario" id="btSalvar">Salvar</button></div>`;
+  <div class="barra-salvar"><button type="button" class="total-vivo" id="totalVivo" title="Ir para o resultado"></button><span id="estadoSalvar"></span>${novo ? '' : (Auth.ehAdmin() ? '<button class="bt perigo" id="btExcluir">Excluir</button>' : '') + '<button class="bt" id="btDuplicar">Duplicar</button>'}<button class="bt primario" id="btSalvar">Salvar</button></div>`;
   $('#btAcordo').addEventListener('click', () => executar(() => {
     if (novo || sujo) throw new Error('Salve o cálculo antes de simular o acordo.');
     location.hash = `#/acordo/${c.id}/novo`;
@@ -784,6 +902,9 @@ function telaCalculo(id, params) {
     if (!ehData(data)) return;
     $('.ordem-verbas').hidden = !c.series.length;
     const r = calcular(c, data);
+    $('#calcVisual').innerHTML = resultadoVisualHTML(c, r);
+    $('#totalVivo').innerHTML = r.total ? `<small>Total em ${fmtData(data)}</small><b>${fmtMoeda(r.total)}</b>` : '';
+    desenharEtapas(r);
     $('#calcResumo').innerHTML = itensResumo(r).map(([rot, v, e]) => `<div class="res-l ${e === 'f' ? 'final' : e === 'b' ? 'dest' : ''}"><span>${esc(rot)}</span><b>${fmtMoeda(v)}</b></div>`).join('')
       || '<p class="vazio">Lance as verbas para ver o cálculo.</p>';
     const ruins = datasInvalidas(c);
@@ -793,6 +914,34 @@ function telaCalculo(id, params) {
     $('#calcDet').innerHTML = tabelasDetalheHTML(r);
   }
   $('#calcData').addEventListener('change', () => { if (ehData($('#calcData').value)) lembrarDataPlanilha(c.id, $('#calcData').value); recalcular(); });
+  $('#totalVivo').addEventListener('click', () => $('#secResultado').scrollIntoView({ behavior: 'smooth' }));
+
+  // ---- Etapas: atalhos para as seções, com a indicação do que já foi preenchido
+  function desenharEtapas(r) {
+    const feito = {
+      secDados: !!c.credorId, secDev: c.devedores.some(d => d.nome), secVerbas: c.rubricas.some(x => x.valor > 0) || c.series.some(s => s.meses?.length),
+      secCustas: c.custas.some(x => x.valor > 0), secHon: c.honorarios.length > 0 || c.multas.length > 0 || !!c.art523.aplicar,
+      secContr: Number(c.honContr) > 0, secAmort: c.amortizacoes.some(a => a.valor > 0), secResultado: r?.total > 0, secAcordos: (original?.acordos || []).length > 0,
+    };
+    const secs = $$('.secao[data-etapa]').filter(s => !s.hidden);
+    $('#etapas').innerHTML = secs.map((s, i) => (i ? '<span class="et-sep"></span>' : '') + `<a href="#" class="etapa ${feito[s.id] ? 'feita' : ''}" data-sec="${s.id}">
+      <span class="et-n">${feito[s.id] ? icone('check') : i + 1}</span><span class="et-t">${esc(s.dataset.etapa)}</span></a>`).join('');
+    $$('#etapas [data-sec]').forEach(a => a.addEventListener('click', e => { e.preventDefault(); $('#' + a.dataset.sec).scrollIntoView({ behavior: 'smooth' }); }));
+    marcarEtapaAtual();
+  }
+  function marcarEtapaAtual() {
+    const lim = (parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--topo')) || 60) + 90;
+    let atual = null;
+    for (const s of $$('.secao[data-etapa]')) if (!s.hidden && s.getBoundingClientRect().top <= lim) atual = s.id;
+    if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4) atual = $$('.secao[data-etapa]').filter(s => !s.hidden).pop()?.id;
+    atual = atual || 'secDados';
+    $$('#etapas [data-sec]').forEach(a => a.classList.toggle('atual', a.dataset.sec === atual));
+    // No celular a barra rola de lado: mantém a etapa atual à vista
+    const el = $('#etapas .atual'), bar = $('#etapas');
+    if (el && bar.scrollWidth > bar.clientWidth) bar.scrollLeft = Math.max(0, el.offsetLeft - bar.clientWidth / 2 + el.offsetWidth / 2);
+  }
+  const aoRolar = () => { if (!document.body.contains($('#etapas'))) return window.removeEventListener('scroll', aoRolar); marcarEtapaAtual(); };
+  window.addEventListener('scroll', aoRolar, { passive: true });
   recalcular();
 
   // ---- Exportação (usa o que está na tela, mesmo antes de salvar)
@@ -845,7 +994,7 @@ function telaCalculo(id, params) {
     if (!confirm('Excluir este cálculo? O arquivo vai para a pasta "lixeira" dos dados.')) return;
     await excluirRegistro('calculos', c.id);
     sujo = false;
-    location.hash = '#/inicio';
+    location.hash = '#/calculos';
   }));
   $('#btDuplicar')?.addEventListener('click', () => executar(async () => {
     if (sujo) throw new Error('Salve as alterações antes de duplicar.');
@@ -853,6 +1002,63 @@ function telaCalculo(id, params) {
     await salvarRegistro('calculos', copia);
     location.hash = '#/calculo/' + copia.id;
   }));
+}
+
+/* ---------- Resultado em destaque: total, composição (rosca), critérios e linha do tempo ---------- */
+function roscaSVG(comp, tam = 150) {
+  const t = comp.reduce((s, [, v]) => s + Math.max(0, v), 0);
+  let ac = 0;
+  const arcos = t > 0 ? comp.filter(([, v]) => v > 0).map(([rot, v, cor]) => {
+    const p = v / t * 100, s = `<circle cx="21" cy="21" r="15.9155" fill="none" stroke="${cor}" stroke-width="6" stroke-dasharray="${Math.max(0, p - 0.4)} ${100 - Math.max(0, p - 0.4)}" stroke-dashoffset="${25 - ac}"><title>${esc(rot)}: ${fmtMoeda(v)}</title></circle>`;
+    ac += p; return s;
+  }).join('') : '';
+  return `<svg viewBox="0 0 42 42" width="${tam}" height="${tam}" class="rosca"><circle cx="21" cy="21" r="15.9155" fill="none" class="rosca-fundo" stroke-width="6"/>${arcos}</svg>`;
+}
+function criteriosUsados(c, r) {
+  const crits = [...(c.rubricas || []), ...(c.custas || []), ...(c.series || [])].filter(x => x.crit && (x.valor > 0 || x.meses?.length)).map(x => x.crit);
+  const out = new Set();
+  crits.forEach(k => {
+    if (k.juros !== 'selic' && k.indice && k.indice !== 'Nenhum') out.add(k.indice);
+    if (k.juros === 'mensal') out.add(`Juros ${fmtPct(k.taxa ?? 1)}% a.m.${k.capitalizar ? ' capitalizados' : ''}`);
+    if (k.juros === 'legal') out.add('Taxa legal');
+    if (k.juros === 'selic') out.add('SELIC');
+    if (k.lei14905) out.add('Lei 14.905 a partir de 30/08/2024');
+  });
+  const l = [...out].map(t => `<span class="chip ${INDICES.includes(t) ? 'ouro' : 'neutro'}">${esc(t)}</span>`);
+  if (r.r523) l.push(`<span class="chip judicial">Art. 523: ${[r.r523.multaPct && `multa ${fmtPct(r.r523.multaPct)}%`, r.r523.honPct && `honorários ${fmtPct(r.r523.honPct)}%`].filter(Boolean).join(' + ')}</span>`);
+  if (r.pctContr) l.push(`<span class="chip neutro">Honorários contratuais ${fmtPct(r.pctContr)}%</span>`);
+  return l.join('');
+}
+function linhaTempoHTML(c, r) {
+  const datas = [];
+  [...(c.rubricas || []), ...(c.custas || [])].filter(x => x.valor > 0).forEach(x => [x.corrDesde, x.jurosDesde].forEach(d => ehData(d) && datas.push(d)));
+  (c.series || []).forEach(s => (s.meses || []).forEach(m => ehData(m.vencimento) && Number(m.valor) > 0 && datas.push(m.vencimento)));
+  if (!datas.length) return '';
+  const ini = datas.sort()[0], fim = r.dataCalc;
+  if (!(fim > ini)) return '';
+  const marcos = [[ini, 'início', 'v']];
+  const lei = '2024-08-30';
+  if ([...(c.rubricas || []), ...(c.custas || []), ...(c.series || [])].some(x => x.crit?.lei14905) && lei > ini && lei < fim) marcos.push([lei, 'Lei 14.905', 'v']);
+  const pagos = (c.amortizacoes || []).filter(a => a.valor > 0 && ehData(a.data) && a.data > ini && a.data < fim).sort((a, b) => comparar(a.data, b.data));
+  pagos.slice(0, 5).forEach(a => marcos.push([a.data, 'pagamento', 'o']));
+  if (pagos.length > 5) marcos.push([pagos[pagos.length - 1].data, `pagamento (+${pagos.length - 5})`, 'o']);
+  marcos.push([fim, 'cálculo', 'v']);
+  const total = diasEntre(ini, fim);
+  const pos = d => 4 + diasEntre(ini, d) / total * 92;
+  marcos.sort((a, b) => comparar(a[0], b[0]));
+  return `<div class="linha-tempo"><div class="lt-eixo"></div>${marcos.map(([d, rot, cor], i) =>
+    `<div class="lt-marco ${cor === 'o' ? 'ouro' : ''} ${i % 2 ? 'cima' : ''}" style="left:${pos(d).toFixed(2)}%"><i></i><b>${fmtData(d)}</b><span>${esc(rot)}</span></div>`).join('')}</div>`;
+}
+function resultadoVisualHTML(c, r) {
+  if (!(r.total > 0)) return '';
+  const comp = composicao(r), t = comp.reduce((s, [, v]) => s + Math.max(0, v), 0);
+  const maior = [...comp].sort((a, b) => b[1] - a[1])[0];
+  return `<div class="res-visual">
+    <div class="res-total"><div class="rt-rot">Débito atualizado em ${fmtData(r.dataCalc)}</div><div class="rt-valor">${fmtMoeda(r.total)}</div>
+      <div class="rt-extenso">${esc(valorPorExtenso(r.total))}</div><div class="rt-chips">${criteriosUsados(c, r)}</div>${linhaTempoHTML(c, r)}</div>
+    <div class="res-comp"><div class="rc-rosca">${roscaSVG(comp)}<div class="rc-meio"><b>${t > 0 ? Math.round(maior[1] / t * 100) : 0}%</b><span>${esc(maior[0].toLowerCase())}</span></div></div>
+      <div class="rc-legenda">${comp.map(([rot, v, cor]) => `<div><i style="background:${cor}"></i>${esc(rot)}<b>${fmtNum(v)}</b></div>`).join('')}</div></div>
+  </div>`;
 }
 
 // Datas preenchidas fora do padrão (ex.: ano "0017"), com a indicação de onde estão
@@ -1356,6 +1562,32 @@ function mostrarConvite(nome, login, senha) {
 function eventosGlobais() {
   $('#btMenu').addEventListener('click', () => document.body.classList.toggle('menu-aberto'));
   $('#fundoMenu').addEventListener('click', () => document.body.classList.remove('menu-aberto'));
+  // Ícones do menu lateral e da barra inferior (celular)
+  $$('#menu [data-ic], #navInferior [data-ic]').forEach(a => a.insertAdjacentHTML('afterbegin', icone(a.dataset.ic)));
+  $('#btMaisInferior').addEventListener('click', e => { e.preventDefault(); document.body.classList.toggle('menu-aberto'); });
+  // Tema: automático (segue o aparelho) → claro → escuro
+  const desenharTema = () => {
+    const t = temaEscolhido();
+    $('#btTema').innerHTML = icone(t === 'escuro' ? 'lua' : t === 'claro' ? 'sol' : 'tema-auto');
+    $('#btTema').title = 'Tema: ' + { auto: 'automático (segue o aparelho)', claro: 'claro', escuro: 'escuro' }[t] + '. Clique para trocar.';
+  };
+  $('#btTema').addEventListener('click', () => {
+    const prox = { auto: 'claro', claro: 'escuro', escuro: 'auto' }[temaEscolhido()];
+    try { localStorage.setItem('ccb-tema', prox); } catch { /* sem armazenamento: vale só agora */ }
+    aplicarTema(prox); desenharTema();
+    aviso('Tema ' + { auto: 'automático: segue o aparelho', claro: 'claro', escuro: 'escuro' }[prox] + '.', 'info');
+  });
+  desenharTema();
+  // Busca rápida (Ctrl+K): abre a lista de cálculos com o cursor na busca
+  const abrirBusca = () => {
+    if (!document.body.classList.contains('conectado')) return;
+    if (location.hash.startsWith('#/calculos')) $('#fBusca')?.focus();
+    else { location.hash = '#/calculos?busca=1'; }
+  };
+  $('#btBuscaTopo').addEventListener('click', abrirBusca);
+  document.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); abrirBusca(); }
+  });
   document.addEventListener('click', e => { if (e.target.closest('[data-fechar]')) fecharModal(); });
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#modal').hidden) fecharModal(); });
   // Ano digitado com dois dígitos ("17" vira "0017"): completa para 2017 (ou 19xx) antes dos demais tratamentos

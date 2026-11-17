@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="#24584a">
+<meta name="theme-color" content="#1f5245">
 <title>Cálculos de Cobrança</title>
 <meta name="description" content="Planilhas de cálculo para cobrança judicial e extrajudicial, em PDF e Excel, com memória de cálculo.">
 <meta property="og:type" content="website">
@@ -29,30 +29,55 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Cálculos">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="preload" href="fontes/inter.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="estilo.css">
+<script>
+  // Tema antes de desenhar a página (evita o clarão ao abrir no modo escuro)
+  try { var t = localStorage.getItem('ccb-tema') || 'auto';
+    document.documentElement.dataset.tema = t === 'escuro' || (t === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches) ? 'escuro' : 'claro'; } catch (e) {}
+</script>
 </head>
 <body>
 <header class="topo">
-  <button id="btMenu" class="bt-menu" aria-label="Abrir menu">&#9776;</button>
-  <a class="marca" href="#/inicio"><img src="icone.svg" alt=""><span>Cálculos de Cobrança</span></a>
-  <div class="acoes-topo"><button type="button" id="btInstalarTopo" class="bt-manual" title="Instalar o aplicativo neste aparelho" hidden>Instalar</button><a class="bt-manual" href="#/manual" title="Manual de uso">Manual</a></div>
+  <button id="btMenu" class="bt-menu" aria-label="Abrir menu"><svg class="ic" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+  <a class="marca" href="#/inicio">
+    <span class="emblema"><svg class="ic" viewBox="0 0 24 24"><path d="M12 3v18M7 21h10M5 7h14M5 7l-3 7a4 4 0 0 0 6 0L5 7zM19 7l-3 7a4 4 0 0 0 6 0l-3-7z"/></svg></span>
+    <span class="nome-app"><b>Cálculos de Cobrança</b><small>Judicial e extrajudicial</small></span></a>
+  <button type="button" id="btBuscaTopo" class="busca-topo" title="Buscar cálculo (Ctrl+K)" hidden><svg class="ic" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg><span>Buscar cálculo, devedor, processo…</span><kbd>Ctrl K</kbd></button>
+  <div class="acoes-topo">
+    <button type="button" id="btInstalarTopo" class="bt-manual" title="Instalar o aplicativo neste aparelho" hidden>Instalar</button>
+    <button type="button" id="btTema" class="bt-topo" title="Tema claro ou escuro"></button>
+    <a class="bt-topo" href="#/manual" title="Manual de uso"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3M12 17h.01"/></svg></a>
+  </div>
   <div class="topo-dir"><div id="usuarioTopo" class="usuario-topo"></div><div id="statusArmaz" class="status-armaz"></div></div>
 </header>
 <nav id="menu" class="menu">
-  <a href="#/inicio" data-rota="inicio">Cálculos</a>
-  <a href="#/calculo/novo" data-rota="calculo">Novo cálculo</a>
-  <a href="#/acordos" data-rota="acordo">Acordos</a>
-  <a href="#/credores" data-rota="credor">Credores (clientes)</a>
-  <a href="#/usuarios" data-rota="usuarios" class="so-admin">Usuários</a>
-  <a href="#/config" data-rota="config" class="so-admin">Configurações</a>
-  <a href="#/conta" data-rota="conta">Minha conta</a>
-  <a href="#/manual" data-rota="manual">Manual de uso</a>
-  <a href="#/sobre" data-rota="sobre">Sobre, termos e privacidade</a>
-  <a href="#" id="btInstalar" class="link-instalar">Instalar o aplicativo</a>
+  <a href="#/calculo/novo" class="menu-novo" data-ic="mais">Novo cálculo</a>
+  <div class="menu-grupo">Trabalho</div>
+  <a href="#/inicio" data-rota="inicio" data-ic="painel">Painel</a>
+  <a href="#/calculos" data-rota="calculo" data-ic="calc">Cálculos <span class="cont" id="contCalculos"></span></a>
+  <a href="#/acordos" data-rota="acordo" data-ic="acordo">Acordos</a>
+  <a href="#/credores" data-rota="credor" data-ic="pessoas">Credores (clientes)</a>
+  <div class="menu-grupo">Administração</div>
+  <a href="#/usuarios" data-rota="usuarios" class="so-admin" data-ic="usuario">Usuários</a>
+  <a href="#/config" data-rota="config" class="so-admin" data-ic="engr">Configurações</a>
+  <a href="#/conta" data-rota="conta" data-ic="conta">Minha conta</a>
+  <div class="menu-grupo">Ajuda</div>
+  <a href="#/manual" data-rota="manual" data-ic="livro">Manual de uso</a>
+  <a href="#/sobre" data-rota="sobre" data-ic="escudo">Sobre, termos e privacidade</a>
+  <a href="#" id="btInstalar" class="link-instalar" data-ic="instalar">Instalar o aplicativo</a>
   <div id="rodapeMenu" class="rodape-menu"></div>
 </nav>
 <div id="fundoMenu" class="fundo-menu"></div>
 <main id="conteudo"><p class="carregando">Carregando…</p></main>
+<nav id="navInferior" class="nav-inferior">
+  <a href="#/inicio" data-rota="inicio" data-ic="painel">Painel</a>
+  <a href="#/calculos" data-rota="calculo" data-ic="calc">Cálculos</a>
+  <a href="#/acordos" data-rota="acordo" data-ic="acordo">Acordos</a>
+  <a href="#/credores" data-rota="credor" data-ic="pessoas">Credores</a>
+  <a href="#" id="btMaisInferior" data-ic="menu">Mais</a>
+</nav>
+<a href="#/calculo/novo" id="fabNovo" class="fab" title="Novo cálculo" hidden><svg class="ic" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></a>
 
 <div id="modal" class="modal" hidden><div class="modal-caixa" id="modalCaixa"></div></div>
 <div id="aviso" class="aviso" role="status"></div>

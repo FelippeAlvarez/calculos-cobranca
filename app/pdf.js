@@ -1,9 +1,13 @@
 'use strict';
 /* PDF (jsPDF): papel timbrado do escritório, tabelas, resumo, prévia e gravação */
-const COR_PRI = [36, 88, 74];
-const COR_FUNDO = [232, 242, 238];
-const COR_TEXTO = [33, 37, 41];
-const COR_SUAVE = [100, 108, 118];
+const COR_PRI = [31, 82, 69];
+const COR_PRI_ESC = [20, 58, 49];
+const COR_OURO = [179, 139, 58];
+const COR_OURO_CLARO = [246, 239, 224];
+const COR_OURO_TEXTO = [93, 70, 21];
+const COR_FUNDO = [231, 241, 237];
+const COR_TEXTO = [29, 39, 35];
+const COR_SUAVE = [95, 109, 104];
 
 function novoDocumento(paisagem) {
   const { jsPDF } = window.jspdf;
@@ -11,29 +15,42 @@ function novoDocumento(paisagem) {
   const P = paisagem ? { doc, M: 14, W: 297, H: 210, larg: 269, y: 0, rodape: 16 } : { doc, M: 14, W: 210, H: 297, larg: 182, y: 0, rodape: 16 };
   const adm = D.config.escritorio || {};
 
-  // Cabeçalho (papel timbrado) repetido em todas as páginas
+  // Cabeçalho (papel timbrado) repetido em todas as páginas: faixa verde com filete dourado, logo num quadro branco
   P.cab = () => {
-    const top = 9;
-    let x = P.M, altLogo = 0;
+    const top = 6;
+    let x = P.M, altLogo = 0, logo = null;
     if (adm.logo && adm.logoL && adm.logoA) {
-      const e = Math.min(40 / adm.logoL, 18 / adm.logoA), w = adm.logoL * e, h = adm.logoA * e;
-      try { doc.addImage(adm.logo, adm.logo.startsWith('data:image/jpeg') ? 'JPEG' : 'PNG', x, top, w, h, 'logo', 'FAST'); x += w + 5; altLogo = h; } catch (err) { console.warn(err); }
+      const e = Math.min(34 / adm.logoL, 15 / adm.logoA);
+      logo = { w: adm.logoL * e, h: adm.logoA * e };
+      altLogo = logo.h + 4;
+      x += logo.w + 4 + 5;
     }
     const larg = P.W - P.M - x;
-    let y = top + 4.8;
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(13); doc.setTextColor(...COR_PRI);
-    doc.text(doc.splitTextToSize(adm.nome || 'Planilha de cobrança', larg)[0], x, y);
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(8.2); doc.setTextColor(...COR_SUAVE);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(7.8);
     const linhas = [
       [adm.documento, adm.oab].filter(Boolean).join('   ·   '),
       adm.endereco,
       [adm.telefone, adm.email, adm.site].filter(Boolean).join('   ·   '),
     ].filter(Boolean).flatMap(l => doc.splitTextToSize(l, larg));
-    linhas.forEach(l => { y += 3.7; doc.text(l, x, y); });
-    const fim = Math.max(top + altLogo, y + 1.2) + 2.5;
-    doc.setDrawColor(...COR_PRI); doc.setLineWidth(0.5);
-    doc.line(P.M, fim, P.W - P.M, fim);
-    P.y = fim + 6;
+    const altTexto = 5.2 + linhas.length * 3.5;
+    const faixa = top + Math.max(altLogo, altTexto) + 5;
+    // Degradê horizontal (faixas finas do verde escuro ao verde)
+    for (let i = 0, n = 48; i < n; i++) {
+      const t = i / (n - 1), cor = COR_PRI_ESC.map((v, k) => Math.round(v + ([44, 110, 92][k] - v) * t));
+      doc.setFillColor(...cor); doc.rect(P.W * i / n, 0, P.W / n + 0.3, faixa, 'F');
+    }
+    doc.setFillColor(...COR_OURO); doc.rect(0, faixa, P.W, 0.9, 'F');
+    if (logo) {
+      const ly = top + (Math.max(altLogo, altTexto) - altLogo) / 2;
+      doc.setFillColor(255, 255, 255); doc.roundedRect(P.M, ly, logo.w + 4, altLogo, 1.6, 1.6, 'F');
+      try { doc.addImage(adm.logo, adm.logo.startsWith('data:image/jpeg') ? 'JPEG' : 'PNG', P.M + 2, ly + 2, logo.w, logo.h, 'logo', 'FAST'); } catch (err) { console.warn(err); }
+    }
+    let y = top + (Math.max(altLogo, altTexto) - altTexto) / 2 + 4.6;
+    doc.setFont('times', 'bold'); doc.setFontSize(14.5); doc.setTextColor(255, 255, 255);
+    doc.text(doc.splitTextToSize(adm.nome || 'Planilha de cobrança', larg)[0], x, y);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(7.8); doc.setTextColor(214, 232, 225);
+    linhas.forEach(l => { y += 3.5; doc.text(l, x, y); });
+    P.y = faixa + 7;
     doc.setTextColor(...COR_TEXTO);
   };
   P.novaPagina = () => { doc.addPage(); P.cab(); };
@@ -120,9 +137,10 @@ function tabelaPDF(P, colsIn, linhas, fsMax = 8.5) {
     const partes = ln.grupo ? [quebra(ln.c[0], P.larg)] : ln.c.map((v, j) => quebra(v, cols[j].w, cols[j].a === 'r' || cols[j].nw));
     const h = Math.max(...partes.map(p => p.length)) * lh + 2 * pad;
     if (P.y + h > P.H - P.rodape) { P.novaPagina(); desenharCab(); fonte(); }
-    if (ln.total || ln.grupo) { doc.setFillColor(...COR_FUNDO); doc.rect(P.M, P.y, P.larg, h, 'F'); }
-    else if (i % 2) { doc.setFillColor(247, 249, 251); doc.rect(P.M, P.y, P.larg, h, 'F'); }
-    doc.setTextColor(...(ln.grupo ? COR_PRI : ln.italico ? COR_SUAVE : COR_TEXTO));
+    if (ln.total) { doc.setFillColor(...COR_OURO_CLARO); doc.rect(P.M, P.y, P.larg, h, 'F'); doc.setDrawColor(...COR_OURO); doc.setLineWidth(0.35); doc.line(P.M, P.y, P.M + P.larg, P.y); }
+    else if (ln.grupo) { doc.setFillColor(...COR_FUNDO); doc.rect(P.M, P.y, P.larg, h, 'F'); }
+    else if (i % 2) { doc.setFillColor(247, 250, 249); doc.rect(P.M, P.y, P.larg, h, 'F'); }
+    doc.setTextColor(...(ln.total ? COR_OURO_TEXTO : ln.grupo ? COR_PRI : ln.italico ? COR_SUAVE : COR_TEXTO));
     escrever(partes, cs, P.y);
     P.y += h;
     doc.setTextColor(...COR_TEXTO);
@@ -184,13 +202,40 @@ function subtituloPDF(P, texto, direita) {
   P.y += 7;
 }
 
+// Título centralizado (serifado, em versalete), filete dourado e linhas de apoio centralizadas
 function tituloPDF(P, titulo, linhas = []) {
-  const { doc } = P;
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(15); doc.setTextColor(...COR_PRI);
-  doc.text(titulo, P.M, P.y + 3);
-  P.y += 7.5;
-  linhas.forEach(([t, fs, est, cor]) => paragrafoPDF(P, t, fs || 9.5, est || 'normal', cor || COR_TEXTO));
-  P.y += 4;
+  const { doc } = P, cx = P.M + P.larg / 2;
+  doc.setFont('times', 'bold'); doc.setFontSize(16); doc.setTextColor(...COR_PRI);
+  doc.setCharSpace?.(0.35);
+  doc.text(titulo.toUpperCase(), cx, P.y + 3.5, { align: 'center' });
+  doc.setCharSpace?.(0);
+  doc.setFillColor(...COR_OURO); doc.rect(cx - 9, P.y + 6, 18, 0.7, 'F');
+  P.y += 9.5;
+  linhas.forEach(([t, fs, est, cor]) => {
+    doc.setFont('helvetica', est || 'normal'); doc.setFontSize(fs || 9.5); doc.setTextColor(...(cor || COR_TEXTO));
+    const lh = (fs || 9.5) * 0.3528 * 1.3;
+    for (const l of doc.splitTextToSize(t, P.larg)) { doc.text(l, cx, P.y + lh * 0.8, { align: 'center' }); P.y += lh; }
+  });
+  doc.setTextColor(...COR_TEXTO);
+  P.y += 5;
+}
+
+// Quadro-resumo: cartões com os principais valores; o último (total) em destaque
+function cartoesPDF(P, cartoes) {
+  if (!cartoes.length) return;
+  const { doc } = P, gap = 3, n = cartoes.length, w = (P.larg - gap * (n - 1)) / n, h = 13;
+  P.espaco(h + 6);
+  cartoes.forEach(([rot, val, dest], i) => {
+    const x = P.M + i * (w + gap);
+    if (dest) { doc.setFillColor(...COR_PRI); doc.roundedRect(x, P.y, w, h, 1.6, 1.6, 'F'); }
+    else { doc.setDrawColor(221, 227, 225); doc.setLineWidth(0.25); doc.setFillColor(255, 255, 255); doc.roundedRect(x, P.y, w, h, 1.6, 1.6, 'FD'); }
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(6.6); doc.setTextColor(...(dest ? [214, 232, 225] : COR_SUAVE));
+    doc.text(doc.splitTextToSize(rot.toUpperCase(), w - 6)[0], x + 3, P.y + 4.6);
+    doc.setFontSize(dest ? 11.5 : 10.5); doc.setTextColor(...(dest ? [255, 255, 255] : COR_TEXTO));
+    doc.text((dest ? 'R$ ' : '') + fmtNum(val), x + 3, P.y + 10.2);
+  });
+  doc.setTextColor(...COR_TEXTO);
+  P.y += h + 6;
 }
 
 // Rodapé com data de emissão e numeração
@@ -202,12 +247,13 @@ function rodapePDF(P) {
   const adm = D.config.escritorio?.nome || '';
   for (let i = 1; i <= n; i++) {
     doc.setPage(i);
-    doc.setDrawColor(210); doc.setLineWidth(0.2);
+    doc.setDrawColor(...COR_OURO); doc.setLineWidth(0.3);
     doc.line(P.M, P.H - 11, P.W - P.M, P.H - 11);
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5); doc.setTextColor(...COR_SUAVE);
-    doc.text(emissao, P.M, P.H - 7);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(7.2); doc.setTextColor(...COR_SUAVE);
+    doc.text(emissao + '  ·  Cálculos de Cobrança', P.M, P.H - 7);
     if (adm) doc.text(adm, P.W / 2, P.H - 7, { align: 'center' });
-    doc.text(`Página ${i} de ${n}`, P.W - P.M, P.H - 7, { align: 'right' });
+    doc.setFont('helvetica', 'bold'); doc.setTextColor(...COR_PRI);
+    doc.text(`${i} / ${n}`, P.W - P.M, P.H - 7, { align: 'right' });
   }
 }
 

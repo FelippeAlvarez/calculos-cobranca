@@ -15,6 +15,7 @@ for (const [n, v] of [['IPCA', 1], ['Taxa legal', 0.5], ['SELIC', 1]]) {
 <script src="../app/calculo.js"></script>
 <script src="../app/series.js"></script>
 <script src="../app/acordo.js"></script>
+<script src="../app/relatorios.js"></script>
 <script>
 const res = [];
 const perto = (a, b, tol = 0.011) => Math.abs(a - b) <= tol;
@@ -283,6 +284,15 @@ const esperadoMes = (valor, venc, calc) => {
   confere('25. pagamento abatido só do condomínio', r.amort[0].imputado.every(l => l.rotulo.startsWith('Condomínio')) ? 1 : 0, 1);
   const ra = calcularAcordo(c, { data: '2024-03-10', desconto: { modo: 'total', tipo: 'pct', valor: 0 }, sinal: { tipo: 'valor', valor: 0 }, parcelas: { modo: 'numero', n: 1, taxa: 0, primeiro: '2024-04-10' } });
   confere('25. acordo com uma linha por série', ra.itens.filter(i => i.itemId.startsWith('serie:')).length, 2);
+}
+
+// 26. Valor por extenso (resultado em destaque) e composição do total
+{
+  const ext = [[134355.61, 'cento e trinta e quatro mil, trezentos e cinquenta e cinco reais e sessenta e um centavos'], [1100000, 'um milhão e cem mil reais'],
+    [2000000, 'dois milhões de reais'], [1001, 'mil e um reais'], [0.01, 'um centavo'], [100, 'cem reais']];
+  confere('26. valor por extenso', ext.every(([v, t]) => valorPorExtenso(v) === t) ? 1 : 0, 1);
+  const r = calc({ rubricas: [rub(1000, '2024-01-10', IPCA1, { multa: 2 })], custas: [{ id: 'c1', descricao: 'Custas', valor: 100, corrDesde: '2024-01-10', jurosDesde: '', crit: { indice: 'IPCA', juros: 'nenhum' } }] }, '2024-03-10');
+  confere('26. composição soma o total', composicao(r).reduce((s, [, v]) => s + v, 0), r.total, 0.011);
 }
 
 document.getElementById('saida').innerHTML = `<p><b>${res.filter(x => x.ok).length} de ${res.length} conferências corretas</b></p>` +
